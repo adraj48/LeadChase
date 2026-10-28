@@ -105,6 +105,7 @@ async function main() {
   const after = await getLead(owner, other.id);
   assert(
     after !== null &&
+      ownerView !== null &&
       ownerView.lead.draft === after.lead.draft &&
       ownerView.messages.length === after.messages.length,
     "other rep's lead draft and messages unchanged",

@@ -18,8 +18,12 @@ export function sortByUrgency<T extends Pick<Lead, "followUpDate" | "tag">>(
   return [...leads].sort((a, b) => {
     const bucketDiff = BUCKET_RANK[bucketOf(a, today)] - BUCKET_RANK[bucketOf(b, today)];
     if (bucketDiff !== 0) return bucketDiff;
-    // Earlier followUpDate first: most overdue first, upcoming ascending, today ties.
-    if (a.followUpDate !== b.followUpDate) return a.followUpDate < b.followUpDate ? -1 : 1;
-    return TAG_RANK[a.tag] - TAG_RANK[b.tag];
+    const bucket = bucketOf(a, today);
+    const byDate = a.followUpDate === b.followUpDate ? 0 : a.followUpDate < b.followUpDate ? -1 : 1;
+    const byTag = TAG_RANK[a.tag] - TAG_RANK[b.tag];
+    // Overdue and today: Hot > Warm > Cold, then most overdue first.
+    // Upcoming: earliest date first, then tag.
+    if (bucket === "upcoming") return byDate || byTag;
+    return byTag || byDate;
   });
 }

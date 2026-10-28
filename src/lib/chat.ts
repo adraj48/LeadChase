@@ -17,6 +17,7 @@ export async function reanalyze(sb: SupabaseClient, id: string, lastContactDate?
     },
     messages: chat.messages.map((m) => ({ from: m.from, text: m.text, at: m.at })),
     today: todayIST(),
+    repName: chat.lead.repName,
   });
   if (!(await saveAnalysis(sb, id, analysis, lastContactDate))) {
     throw new HttpError(404, "Lead not found");

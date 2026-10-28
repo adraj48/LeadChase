@@ -20,3 +20,8 @@ export function diffDays(later: string, earlier: string): number {
 export function daysOverdue(followUpDate: string, today: string): number {
   return diffDays(today, followUpDate);
 }
+
+// Asia/Kolkata calendar date (YYYY-MM-DD) of an ISO instant.
+export function istDateOf(iso: string): string {
+  return todayIST(new Date(iso));
+}

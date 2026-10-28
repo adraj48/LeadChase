@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { todayIST, addDays, diffDays, daysOverdue } from "@/lib/dates";
+import { todayIST, addDays, diffDays, daysOverdue, istDateOf } from "@/lib/dates";
 import { bucketOf, sortByUrgency } from "@/lib/urgency";
 import type { Tag } from "@/lib/types";
 
@@ -7,6 +7,11 @@ describe("dates", () => {
   it("todayIST uses Asia/Kolkata", () => {
     expect(todayIST(new Date("2026-10-28T20:00:00Z"))).toBe("2026-10-29");
     expect(todayIST(new Date("2026-10-28T10:00:00Z"))).toBe("2026-10-28");
+  });
+  it("istDateOf converts an ISO instant to the IST calendar date", () => {
+    expect(istDateOf("2026-10-28T10:00:00Z")).toBe("2026-10-28");
+    expect(istDateOf("2026-10-28T20:00:00Z")).toBe("2026-10-29");
+    expect(istDateOf("2026-10-28T18:29:59Z")).toBe("2026-10-28");
   });
   it("addDays adds days", () => {
     expect(addDays("2026-10-30", 3)).toBe("2026-11-02");
@@ -38,7 +43,7 @@ describe("sortByUrgency", () => {
   const today = "2026-10-28";
   const l = (id: string, followUpDate: string, tag: Tag) => ({ id, followUpDate, tag });
 
-  it("orders overdue, today, upcoming with tag tie-breaks", () => {
+  it("orders overdue, today, upcoming; tag first inside overdue/today", () => {
     const input = [
       l("up-cold", "2026-10-30", "Cold"),
       l("up-hot-late", "2026-11-05", "Hot"),
@@ -51,9 +56,9 @@ describe("sortByUrgency", () => {
       l("today-warm", "2026-10-28", "Warm"),
     ];
     expect(sortByUrgency(input, today).map((x) => x.id)).toEqual([
-      "od-cold-5",
       "od-hot-1",
       "od-warm-1",
+      "od-cold-5",
       "today-hot",
       "today-warm",
       "today-cold",
@@ -61,6 +66,16 @@ describe("sortByUrgency", () => {
       "up-cold",
       "up-hot-late",
     ]);
+  });
+
+  it("puts a Hot lead overdue 1 day before a Cold lead overdue 15 days", () => {
+    const out = sortByUrgency([l("cold-15", "2026-10-13", "Cold"), l("hot-1", "2026-10-27", "Hot")], today);
+    expect(out.map((x) => x.id)).toEqual(["hot-1", "cold-15"]);
+  });
+
+  it("within the same tag, most overdue first", () => {
+    const out = sortByUrgency([l("a", "2026-10-27", "Warm"), l("b", "2026-10-20", "Warm")], today);
+    expect(out.map((x) => x.id)).toEqual(["b", "a"]);
   });
 
   it("does not mutate input", () => {

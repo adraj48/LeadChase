@@ -5,6 +5,8 @@ import { validateMessage } from "@/lib/validate";
 import { isDuplicateOfLatest, reanalyze } from "@/lib/chat";
 import { HttpError, json, leadIdFrom, readJson, requireUser, withErrors } from "@/lib/http";
 
+export const maxDuration = 60;
+
 type Ctx = { params: Promise<{ id: string }> };
 
 export const POST = withErrors(async (req: Request, ctx: Ctx) => {

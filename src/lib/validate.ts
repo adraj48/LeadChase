@@ -1,13 +1,30 @@
 import type { NewLeadInput } from "@/lib/repo";
 
+// Shared with the client components, so this module must stay free of server imports.
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type Ok<T> = { ok: true; value: T };
 type Err = { ok: false; error: string };
 
 export const SOURCES = ["IndiaMART", "Referral", "Trade show", "Website", "Cold call"] as const;
-const PHONE = /^\+?[0-9 ]{10,15}$/;
+const PHONE_CHARS = /^\+?[0-9 ()-]+$/;
 const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MAX_TEXT = 1000;
 const MAX_NAME = 120;
+
+// Indian mobile numbers only: returns "+91 XXXXX XXXXX" or null. Accepts 10 digits,
+// 0-prefixed 11 digits, or a 91 country code (with or without "+").
+export function normalizePhone(raw: string): string | null {
+  const t = raw.trim();
+  if (!PHONE_CHARS.test(t)) return null;
+  let d = t.replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  if (!/^[6-9]\d{9}$/.test(d)) return null;
+  return `+91 ${d.slice(0, 5)} ${d.slice(5)}`;
+}
+
+export const PHONE_ERROR = "Enter a valid 10-digit Indian mobile number.";
 
 const fail = (error: string): Err => ({ ok: false, error });
 
@@ -59,7 +76,8 @@ export function validateNewLead(body: unknown, today: string): Ok<NewLeadInput> 
   if (!company.ok) return company;
   const phone = reqString(o, "phone", 40);
   if (!phone.ok) return phone;
-  if (!PHONE.test(phone.value)) return fail("phone is invalid");
+  const normalized = normalizePhone(phone.value);
+  if (!normalized) return fail(PHONE_ERROR);
   const source = reqString(o, "source", 40);
   if (!source.ok) return source;
   if (!(SOURCES as readonly string[]).includes(source.value)) return fail("source is invalid");
@@ -67,13 +85,19 @@ export function validateNewLead(body: unknown, today: string): Ok<NewLeadInput> 
   if (!date.ok) return date;
   if (!isRealIsoDate(date.value)) return fail("lastContactDate must be a valid YYYY-MM-DD date");
   if (date.value > today) return fail("lastContactDate cannot be in the future");
-  const value: NewLeadInput = {
-    name: name.value,
-    company: company.value,
-    phone: phone.value,
-    source: source.value,
-    lastContactDate: date.value,
+  // Every lead belongs to one rep. The route then checks the id against the reps table.
+  if (typeof o.repId !== "string" || !o.repId.trim()) return fail("repId is required");
+  const repId = o.repId.trim();
+  if (!UUID_RE.test(repId)) return fail("repId is invalid");
+  return {
+    ok: true,
+    value: {
+      name: name.value,
+      company: company.value,
+      phone: normalized,
+      source: source.value,
+      lastContactDate: date.value,
+      repId: repId.toLowerCase(),
+    },
   };
-  if (typeof o.repId === "string" && o.repId.trim()) value.repId = o.repId.trim();
-  return { ok: true, value };
 }

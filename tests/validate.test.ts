@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { validateNewLead, validateText, validateMessage } from "@/lib/validate";
+import { normalizePhone, validateNewLead, validateText, validateMessage } from "@/lib/validate";
 
 const today = "2026-10-28";
 const good = {
@@ -8,6 +8,7 @@ const good = {
   phone: " +91 98765 43210 ",
   source: "IndiaMART",
   lastContactDate: "2026-10-20",
+  repId: " 33333333-3333-4333-8333-33333333333A ",
 };
 
 describe("validateText", () => {
@@ -61,12 +62,21 @@ describe("validateNewLead", () => {
         phone: "+91 98765 43210",
         source: "IndiaMART",
         lastContactDate: "2026-10-20",
+        repId: "33333333-3333-4333-8333-33333333333a",
       },
     });
   });
-  it("passes repId through when it is a string", () => {
-    const r = validateNewLead({ ...good, repId: "abc" }, today);
-    expect(r.ok && r.value.repId).toBe("abc");
+  it("requires repId (every lead belongs to a rep; there is no signed-in default)", () => {
+    const { repId: _r, ...rest } = good;
+    void _r;
+    expect(validateNewLead(rest, today)).toEqual({ ok: false, error: "repId is required" });
+    expect(validateNewLead({ ...good, repId: "  " }, today)).toEqual({ ok: false, error: "repId is required" });
+    expect(validateNewLead({ ...good, repId: 5 }, today)).toEqual({ ok: false, error: "repId is required" });
+  });
+  it("rejects a repId that is not a uuid", () => {
+    for (const bad of ["abc", "all", "33333333-3333-4333-8333", "33333333-3333-4333-8333-33333333333g"]) {
+      expect(validateNewLead({ ...good, repId: bad }, today), bad).toEqual({ ok: false, error: "repId is invalid" });
+    }
   });
   it("rejects missing company", () => {
     expect(validateNewLead({ ...good, company: "  " }, today).ok).toBe(false);
@@ -77,6 +87,12 @@ describe("validateNewLead", () => {
   it("rejects bad phone", () => {
     expect(validateNewLead({ ...good, phone: "12ab" }, today).ok).toBe(false);
     expect(validateNewLead({ ...good, phone: "123" }, today).ok).toBe(false);
+  });
+  it("normalizes a phone entered without country code and gives a full-sentence error", () => {
+    const r = validateNewLead({ ...good, phone: "90000 00099" }, today);
+    expect(r.ok && r.value.phone).toBe("+91 90000 00099");
+    const bad = validateNewLead({ ...good, phone: "12345" }, today);
+    expect(bad).toEqual({ ok: false, error: "Enter a valid 10-digit Indian mobile number." });
   });
   it("rejects future date", () => {
     expect(validateNewLead({ ...good, lastContactDate: "2026-10-29" }, today).ok).toBe(false);
@@ -104,5 +120,18 @@ describe("validateNewLead", () => {
     expect(validateNewLead(null, today).ok).toBe(false);
     expect(validateNewLead("x", today).ok).toBe(false);
     expect(validateNewLead([], today).ok).toBe(false);
+  });
+});
+
+describe("normalizePhone", () => {
+  it("formats the accepted shapes to +91 XXXXX XXXXX", () => {
+    for (const p of ["9000000099", "90000 00099", "+91 90000 00099", "+919000000099", "919000000099", "09000000099", "+91-90000-00099"]) {
+      expect(normalizePhone(p), p).toBe("+91 90000 00099");
+    }
+  });
+  it("rejects bad numbers", () => {
+    for (const p of ["", "123", "12ab", "5000000099", "+1 202 555 0100", "90000000999"]) {
+      expect(normalizePhone(p), p).toBeNull();
+    }
   });
 });

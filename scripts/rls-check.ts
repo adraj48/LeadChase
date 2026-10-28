@@ -1,9 +1,13 @@
-// RLS smoke check. Uses ONLY the publishable key and signs in as seeded demo users.
+// Demo-mode access check (open_demo_access migration). Uses ONLY the publishable key,
+// with no session, i.e. exactly what any browser has. Expected:
+//   - anon can read public.leads (needed for Realtime);
+//   - anon cannot read reps or messages;
+//   - anon cannot insert, update or delete anything.
+// Every write probe targets a row that does not exist or would violate a constraint, so
+// nothing is changed even if a protection were missing; such a gap shows up as an error
+// code other than 42501 (or no error at all) and fails the check.
 import { config } from "dotenv";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { addMessage, getCurrentRep, getLead, listLeads, saveDraft, createLead } from "../src/lib/repo";
-import { SEED_LEADS } from "./seed-data";
-import { todayIST } from "../src/lib/dates";
+import { createClient } from "@supabase/supabase-js";
 
 config({ path: ".env.local" });
 
@@ -25,116 +29,71 @@ function must(name: string): string {
   return v;
 }
 
-const url = must("NEXT_PUBLIC_SUPABASE_URL");
-const key = must("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+const NO_ROW = "00000000-0000-4000-8000-000000000000";
+type Res = { data: unknown; error: { code?: string; message: string } | null };
 
-async function signIn(email: string): Promise<SupabaseClient> {
-  const sb = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { error } = await sb.auth.signInWithPassword({ email, password: "demo1234" });
-  if (error) {
-    console.error(`Could not sign in as ${email}: ${error.message}. Has the seed been run?`);
-    process.exit(1);
-  }
-  return sb;
-}
+// 42501 = insufficient privilege or row-level security violation: denied either way.
+const denied = (r: Res) => r.error?.code === "42501";
+const describe = (r: Res) => (r.error ? `${r.error.code ?? "?"} ${r.error.message}` : "no error");
+// A denied read is either a privilege error or zero rows.
+const readsNothing = (r: Res) => !!r.error || (Array.isArray(r.data) && r.data.length === 0);
 
 async function main() {
-  // Owner first, only to learn ids and a baseline to prove nothing changes later.
-  const owner = await signIn("owner@axon.demo");
-  console.log("owner");
-  const ownerRep = await getCurrentRep(owner);
-  assert(ownerRep?.role === "owner", "getCurrentRep returns the owner row");
-  const all = await listLeads(owner);
-  assert(all.length === SEED_LEADS.length, `owner sees all ${SEED_LEADS.length} leads (saw ${all.length})`);
+  const anon = createClient(must("NEXT_PUBLIC_SUPABASE_URL"), must("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"), {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 
-  assert(all.every((l) => l.repName.trim().length > 0), "owner: every lead has a non-empty repName (reps(name) embed works under RLS)");
+  console.log("reads");
+  const leads = await anon.from("leads").select("id, rep_id, tag, analysis_status").limit(5);
+  assert(!leads.error && (leads.data?.length ?? 0) > 0, `anon reads leads (${describe(leads)}, ${leads.data?.length ?? 0} rows)`);
+  const reps = await anon.from("reps").select("id").limit(5);
+  assert(readsNothing(reps), `anon cannot read reps (${describe(reps)})`);
+  const messages = await anon.from("messages").select("id").limit(5);
+  assert(readsNothing(messages), `anon cannot read messages (${describe(messages)})`);
 
-  const rep1 = await signIn("rep1@axon.demo");
-  console.log("rep1");
-  const me = await getCurrentRep(rep1);
-  assert(me?.email === "rep1@axon.demo", "getCurrentRep returns rep1");
-  const mine = await listLeads(rep1);
-  assert(mine.length > 0, `sees > 0 leads (saw ${mine.length})`);
-  assert(mine.every((l) => l.repId === me!.id), "every visible lead belongs to rep1");
-  assert(mine.length < all.length, "sees fewer leads than the owner");
-  assert(mine.every((l) => l.repName.trim().length > 0), "rep1: every lead has a non-empty repName (reps(name) embed works under RLS)");
+  console.log("writes");
+  const leadInsert = await anon.from("leads").insert({
+    rep_id: NO_ROW, // unknown rep: a foreign key error if the insert were ever allowed
+    name: "rls-check",
+    company: "rls-check",
+    phone: "+91 90000 00000",
+    source: "Website",
+    last_contact_date: "2026-01-01",
+    tag: "Cold",
+    reason: "rls-check",
+    follow_up_date: "2026-01-08",
+    draft: "rls-check",
+    analysis_source: "fallback",
+  });
+  assert(denied(leadInsert), `anon cannot insert leads (${describe(leadInsert)})`);
+  const leadUpdate = await anon.from("leads").update({ draft: "rls-check" }).eq("id", NO_ROW);
+  assert(denied(leadUpdate), `anon cannot update leads (${describe(leadUpdate)})`);
+  const leadDelete = await anon.from("leads").delete().eq("id", NO_ROW);
+  assert(denied(leadDelete), `anon cannot delete leads (${describe(leadDelete)})`);
 
-  const chatPhones = new Set(SEED_LEADS.filter((l) => l.messages.length > 0).map((l) => l.phone));
-  const other = all.find((l) => l.repId !== me!.id && chatPhones.has(l.phone));
-  const own = mine.find((l) => chatPhones.has(l.phone));
-  if (!other || !own) {
-    console.error("Seed data missing a chat lead for rep1 or for another rep. Has the seed been run?");
-    process.exit(1);
-  }
+  const msgInsert = await anon.from("messages").insert({ lead_id: NO_ROW, sender: "rep", body: "rls-check" });
+  assert(denied(msgInsert), `anon cannot insert messages (${describe(msgInsert)})`);
+  const msgUpdate = await anon.from("messages").update({ body: "rls-check" }).eq("id", NO_ROW);
+  assert(denied(msgUpdate), `anon cannot update messages (${describe(msgUpdate)})`);
+  const msgDelete = await anon.from("messages").delete().eq("id", NO_ROW);
+  assert(denied(msgDelete), `anon cannot delete messages (${describe(msgDelete)})`);
 
-  // Positive controls: policies must not be over-strict.
-  const ownerView = await getLead(owner, other.id);
-  assert(ownerView !== null && ownerView.messages.length > 0, "owner sees another rep's lead with its messages");
-  const ownView = await getLead(rep1, own.id);
-  assert(ownView !== null && ownView.messages.length > 0, "rep1 sees own lead with its messages");
-
-  // Positive own-lead write (same draft back, so seeded data is untouched).
-  assert(ownView !== null && (await saveDraft(rep1, own.id, ownView.lead.draft)) === true, "saveDraft on rep1's own lead returns true");
-
-  // Leads policy: another rep's lead is invisible and unchangeable.
-  assert((await getLead(rep1, other.id)) === null, "getLead on another rep's lead returns null");
-  assert((await saveDraft(rep1, other.id, "HACKED")) === false, "saveDraft on another rep's lead returns false");
-  assert((await addMessage(rep1, other.id, "rep", "HACKED")) === null, "addMessage on another rep's lead returns null");
-
-  // Messages policy, queried directly so the leads query cannot mask a broken policy.
-  const hidden = await rep1.from("messages").select("id").eq("lead_id", other.id);
-  assert(!hidden.error && (hidden.data?.length ?? -1) === 0, "rep1 reads 0 messages of another rep's lead");
-  const ownerMsgs = await owner.from("messages").select("id").eq("lead_id", other.id);
-  assert(!ownerMsgs.error && (ownerMsgs.data?.length ?? 0) > 0, "owner reads > 0 messages of that same lead");
-
-  // Insert policy: cannot create a lead for another rep, and the error must be an RLS violation.
-  let insertErr = "";
-  try {
-    await createLead(
-      rep1,
-      other.repId,
-      { name: "x", company: "x", phone: "+91 98000 00000", source: "Website", lastContactDate: todayIST() },
-      { tag: "Cold", reason: "x", followUpDate: todayIST(), draft: "x", analysisSource: "fallback" },
-    );
-  } catch (e) {
-    insertErr = e instanceof Error ? e.message : String(e);
-  }
-  assert(/row-level security|42501/i.test(insertErr), `createLead for another rep is blocked by RLS (got: ${insertErr || "no error"})`);
-
-  // Update WITH CHECK: cannot reassign own lead to another rep.
-  const reassign = await rep1.from("leads").update({ rep_id: other.repId }).eq("id", own.id).select("id");
-  assert(!!reassign.error || (reassign.data?.length ?? 0) === 0, "reassigning own lead to another rep is rejected");
-  const ownAfter = await getLead(owner, own.id);
-  assert(ownAfter !== null && ownAfter.lead.repId === me!.id, "own lead's rep_id unchanged after reassign attempt");
-
-  // Nothing changed on the other rep's lead.
-  const after = await getLead(owner, other.id);
-  assert(
-    after !== null &&
-      ownerView !== null &&
-      ownerView.lead.draft === after.lead.draft &&
-      ownerView.messages.length === after.messages.length,
-    "other rep's lead draft and messages unchanged",
-  );
-
-  // Anonymous (no session) must not read anything.
-  const anon = createClient(url, key, { auth: { persistSession: false } });
-  let anonRows = 0;
-  try {
-    anonRows = (await listLeads(anon)).length;
-  } catch {
-    anonRows = 0;
-  }
-  assert(anonRows === 0, "anonymous client reads no leads");
+  // No name: a not-null error if the insert were ever allowed.
+  const repInsert = await anon.from("reps").insert({ id: NO_ROW, email: "rls-check@seed.invalid", role: "rep" });
+  assert(denied(repInsert), `anon cannot insert reps (${describe(repInsert)})`);
+  const repUpdate = await anon.from("reps").update({ name: "rls-check" }).eq("id", NO_ROW);
+  assert(denied(repUpdate), `anon cannot update reps (${describe(repUpdate)})`);
+  const repDelete = await anon.from("reps").delete().eq("id", NO_ROW);
+  assert(denied(repDelete), `anon cannot delete reps (${describe(repDelete)})`);
 
   if (failures > 0) {
-    console.error(`\nRLS check FAILED: ${failures} assertion(s).`);
+    console.error(`\nAccess check FAILED: ${failures} assertion(s). Has the open_demo_access migration been applied?`);
     process.exit(1);
   }
-  console.log("\nRLS check passed.");
+  console.log("\nAccess check passed.");
 }
 
 main().catch((e) => {
-  console.error("RLS check crashed:", e instanceof Error ? e.message : e);
+  console.error("Access check crashed:", e instanceof Error ? e.message : e);
   process.exit(1);
 });

@@ -12,6 +12,8 @@ describe("dates", () => {
     expect(istDateOf("2026-10-28T10:00:00Z")).toBe("2026-10-28");
     expect(istDateOf("2026-10-28T20:00:00Z")).toBe("2026-10-29");
     expect(istDateOf("2026-10-28T18:29:59Z")).toBe("2026-10-28");
+    expect(() => istDateOf("not a date")).not.toThrow();
+    expect(istDateOf("")).toBe("");
   });
   it("addDays adds days", () => {
     expect(addDays("2026-10-30", 3)).toBe("2026-11-02");

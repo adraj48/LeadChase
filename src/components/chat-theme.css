@@ -1,0 +1,146 @@
+/* Dark chat theme for the lead thread. Unlayered on purpose so it wins over utility classes. */
+.chat-box {
+  --chat-bg: #0b141a;
+  --chat-in: #202c33;
+  --chat-out: #005c4b;
+  --chat-text: #e9edef;
+  --chat-muted: #8696a0;
+  display: flex;
+  flex-direction: column;
+  max-height: 20rem;
+  min-height: 120px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background-color: var(--chat-bg);
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320' fill='none' stroke='rgb(134,150,160)' stroke-opacity='.12' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'><circle cx='38' cy='34' r='9'/><path d='M120 22l4 9 10 1-7.500 6.500 2.500 10-9-5.500-9 5.500 2.500-10L106 32l10-1z'/><path d='M214 18h34a6 6 0 0 1 6 6v18a6 6 0 0 1-6 6h-20l-9 8v-8h-5a6 6 0 0 1-6-6V24a6 6 0 0 1 6-6z'/><path d='M290 60c-18 0-28 12-28 28 16 0 28-10 28-28zM290 60c-8 8-16 16-22 28'/><path d='M30 104l22-8 22 8v22l-22 8-22-8zM30 104l22 8 22-8M52 112v22'/><path d='M132 98c-12 0-22 8-22 18s10 18 22 18 22-8 22-18-10-18-22-18zM122 116h20'/><path d='M206 108h40l4 36h-48zM216 108a10 10 0 0 1 20 0'/><rect x='282' y='112' width='22' height='40' rx='4'/><path d='M290 144h6'/><path d='M44 188l6 14M44 188l-4 18 10-4zM50 202l8 12'/><path d='M118 190c-8-10-22-4-20 8 2 10 20 20 20 20s18-10 20-20c2-12-12-18-20-8z'/><path d='M200 192l16 28h-32z'/><path d='M270 190v24M258 202h24'/><circle cx='36' cy='262' r='5'/><path d='M82 252h20a8 8 0 0 1 0 16H82a8 8 0 0 1 0-16zM92 252v16'/><path d='M150 246l8 8-16 16-8 2 2-8z'/><path d='M226 250c-10 0-18 6-18 14s8 14 18 14 18-6 18-14-8-14-18-14zM218 264h16'/><circle cx='296' cy='270' r='11'/><path d='M60 300l4-8 4 8M180 296h12M186 290v12M250 300a6 6 0 0 1 12 0'/></svg>");
+  background-size: 320px 320px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+@media (min-width: 1024px) {
+  .chat-box { flex: 1 1 0%; max-height: none; }
+}
+.chat-box::-webkit-scrollbar { width: 6px; }
+.chat-box::-webkit-scrollbar-track { background: transparent; }
+.chat-box::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 3px; }
+
+.chat-empty {
+  margin: auto;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: #182229;
+  color: var(--chat-muted);
+  font-size: 13px;
+}
+
+.chat-day {
+  align-self: center;
+  margin: 8px 0;
+  padding: 5px 12px;
+  border-radius: 8px;
+  background: #182229;
+  color: var(--chat-muted);
+  font-size: 12px;
+  line-height: 1.3;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.5);
+}
+
+.chat-row { display: flex; margin-top: 8px; }
+.chat-row.in { justify-content: flex-start; }
+.chat-row.out { justify-content: flex-end; }
+.chat-row.same { margin-top: 2px; }
+.chat-day + .chat-row { margin-top: 0; }
+
+.chat-box .bubble {
+  position: relative;
+  max-width: 85%;
+  min-width: 0;
+  padding: 6px 9px 7px;
+  border-radius: 8px;
+  color: var(--chat-text);
+  font-size: 14px;
+  line-height: 1.35;
+  box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.4);
+  transition: background-color 150ms ease-out;
+}
+@media (min-width: 640px) {
+  .chat-box .bubble { max-width: 75%; }
+}
+.chat-in .bubble { background: var(--chat-in); border-top-left-radius: 0; }
+.chat-out .bubble { background: var(--chat-out); border-top-right-radius: 0; }
+.chat-row:not(.tail) .bubble { border-radius: 8px; }
+.chat-row.in:not(.tail) .bubble, .chat-row.out:not(.tail) .bubble { border-radius: 8px; }
+.chat-box .chat-row.in .bubble:hover { background: #26343c; box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.4); }
+.chat-box .chat-row.out .bubble:hover { background: #02685a; box-shadow: 0 1px 0.5px rgba(11, 20, 26, 0.4); }
+
+/* Tail on the first bubble of a run. */
+.chat-row.tail .bubble::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 13px;
+}
+.chat-row.in.tail .bubble { border-top-left-radius: 0; }
+.chat-row.in.tail .bubble::before {
+  left: -8px;
+  background: var(--chat-in);
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+}
+.chat-row.out.tail .bubble { border-top-right-radius: 0; }
+.chat-row.out.tail .bubble::before {
+  right: -8px;
+  background: var(--chat-out);
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+.chat-row.in.tail .bubble:hover::before { background: #26343c; }
+.chat-row.out.tail .bubble:hover::before { background: #02685a; }
+
+.chat-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Time floats bottom-right, sharing the last line with short text. */
+.chat-text::after {
+  content: "";
+  display: inline-block;
+  width: 0;
+}
+.chat-meta {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 6px 0 -4px 10px;
+  color: rgba(233, 237, 239, 0.6);
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transition: color 150ms ease-out;
+}
+.chat-box .bubble:hover .chat-meta { color: rgba(233, 237, 239, 0.8); }
+.chat-ticks { width: 16px; height: 11px; flex: none; }
+.chat-box .bubble::after { content: ""; display: block; clear: both; }
+
+/* Chat placeholder while the thread loads (header and draft are already shown). */
+.chat-skel { justify-content: flex-end; gap: 8px; }
+.chat-skel-bubble {
+  display: block;
+  height: 30px;
+  border-radius: 8px;
+  opacity: 0.7;
+}
+.chat-skel-in { align-self: flex-start; background: var(--chat-in); }
+.chat-skel-out { align-self: flex-end; background: var(--chat-out); }
+@media (prefers-reduced-motion: no-preference) {
+  .chat-skel-bubble { animation: chat-skel-pulse 1.2s ease-in-out infinite; }
+  @keyframes chat-skel-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 0.8; }
+  }
+}

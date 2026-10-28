@@ -1,35 +1,29 @@
 import { describe, it, expect } from "vitest";
-import { decideAccess } from "@/lib/access";
+import { ALL_REPS_VIEWER, parseRepScope } from "@/lib/access";
 
-const next = { action: "next" };
-const to = (p: string) => ({ action: "redirect", to: p });
+const REP = "33333333-3333-4333-8333-333333333333";
 
-describe("decideAccess", () => {
-  it("signed out: / and /dashboard* go to /login", () => {
-    expect(decideAccess("/", false)).toEqual(to("/login"));
-    expect(decideAccess("/dashboard", false)).toEqual(to("/login"));
-    expect(decideAccess("/dashboard/leads/1", false)).toEqual(to("/login"));
+describe("parseRepScope (?rep=)", () => {
+  it("missing, empty or 'all' means every rep", () => {
+    expect(parseRepScope(null)).toEqual({ kind: "all" });
+    expect(parseRepScope("")).toEqual({ kind: "all" });
+    expect(parseRepScope("  ")).toEqual({ kind: "all" });
+    expect(parseRepScope("all")).toEqual({ kind: "all" });
+    expect(parseRepScope("ALL")).toEqual({ kind: "all" });
   });
-  it("signed out: /api/* is unauthorized", () => {
-    expect(decideAccess("/api/leads", false)).toEqual({ action: "unauthorized" });
-    expect(decideAccess("/api/auth/logout", false)).toEqual({ action: "unauthorized" });
+  it("a uuid selects that rep (normalised to lower case)", () => {
+    expect(parseRepScope(REP)).toEqual({ kind: "rep", repId: REP });
+    expect(parseRepScope(REP.toUpperCase())).toEqual({ kind: "rep", repId: REP });
   });
-  it("signed out: /login is allowed", () => {
-    expect(decideAccess("/login", false)).toEqual(next);
+  it("anything else is invalid", () => {
+    for (const bad of ["nope", "123", `${REP}x`, "all,all", "' or 1=1 --", REP.slice(1)]) {
+      expect(parseRepScope(bad), bad).toEqual({ kind: "invalid" });
+    }
   });
-  it("signed in: /login and / go to /dashboard", () => {
-    expect(decideAccess("/login", true)).toEqual(to("/dashboard"));
-    expect(decideAccess("/", true)).toEqual(to("/dashboard"));
-  });
-  it("signed in: dashboard and api pass through", () => {
-    expect(decideAccess("/dashboard", true)).toEqual(next);
-    expect(decideAccess("/dashboard/x", true)).toEqual(next);
-    expect(decideAccess("/api/leads", true)).toEqual(next);
-  });
-  it("lookalike paths are not treated as protected or login", () => {
-    expect(decideAccess("/dashboardx", false)).toEqual(next);
-    expect(decideAccess("/apixyz", false)).toEqual(next);
-    expect(decideAccess("/loginfoo", true)).toEqual(next);
-    expect(decideAccess("/loginfoo", false)).toEqual(next);
+});
+
+describe("ALL_REPS_VIEWER", () => {
+  it("is the fixed all-reps viewer (no login)", () => {
+    expect(ALL_REPS_VIEWER).toEqual({ id: "all", name: "All reps", email: "", role: "owner" });
   });
 });

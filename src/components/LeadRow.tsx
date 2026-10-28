@@ -1,31 +1,39 @@
+import { memo } from "react";
 import type { Lead } from "@/lib/types";
 import { followUpLabel } from "@/lib/lead-view";
 import { TagChip } from "./TagChip";
 
 const ROW_STYLE = {
-  overdue: "border-l-4 border-red-500 bg-red-50",
-  today: "border-l-4 border-amber-400 bg-white",
-  upcoming: "border-l-4 border-transparent bg-white",
+  overdue: "border-red-200 bg-red-50/60 hover:border-red-300",
+  today: "border-neutral-100 bg-neutral-25 hover:border-primary-200",
+  upcoming: "border-neutral-100 bg-neutral-25 hover:border-primary-200",
 } as const;
 
 const LABEL_STYLE = {
   overdue: "text-red-700 font-semibold",
   today: "text-amber-800 font-semibold",
-  upcoming: "text-slate-500",
+  upcoming: "text-neutral-600",
 } as const;
 
-export function LeadRow({
+// Memoized: selecting a lead re-renders only the two rows whose `selected` changed,
+// not the whole list (151 rows in "All reps").
+export const LeadRow = memo(function LeadRow({
   lead,
   today,
   selected,
   showRep,
   onSelect,
+  onIntent,
+  onIntentEnd,
 }: {
   lead: Lead;
   today: string;
   selected: boolean;
   showRep: boolean;
   onSelect: (id: string) => void;
+  // Prefetch hooks: the rep is likely about to open this lead (hover, focus, touch).
+  onIntent?: (id: string) => void;
+  onIntentEnd?: (id: string) => void;
 }) {
   const label = followUpLabel(lead.followUpDate, today);
   return (
@@ -33,23 +41,33 @@ export function LeadRow({
       type="button"
       data-lead-id={lead.id}
       onClick={() => onSelect(lead.id)}
+      onPointerEnter={(e) => {
+        if (e.pointerType === "mouse") onIntent?.(lead.id);
+      }}
+      onPointerLeave={(e) => {
+        if (e.pointerType === "mouse") onIntentEnd?.(lead.id);
+      }}
+      onTouchStart={() => onIntent?.(lead.id)}
+      onTouchMove={() => onIntentEnd?.(lead.id)}
+      onFocus={() => onIntent?.(lead.id)}
+      onBlur={() => onIntentEnd?.(lead.id)}
       aria-current={selected ? "true" : undefined}
-      className={`block w-full rounded-lg border border-slate-200 p-3 text-left shadow-sm hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${ROW_STYLE[label.tone]} ${
-        selected ? "ring-2 ring-blue-600" : ""
+      className={`focus-ring lead-row block w-full rounded-card border p-3.5 text-left ${
+        selected ? "border-primary-500 bg-primary-25 shadow-panel" : ROW_STYLE[label.tone]
       }`}
     >
       <span className="flex min-w-0 items-start justify-between gap-2">
         <span className="min-w-0 truncate">
-          <span className="font-bold text-slate-900">{lead.name}</span>
-          <span className="text-slate-600"> · {lead.company}</span>
+          <span className="font-semibold text-neutral-900">{lead.name}</span>
+          <span className="text-neutral-600"> · {lead.company}</span>
         </span>
-        <span className={`shrink-0 text-sm ${LABEL_STYLE[label.tone]}`}>{label.text}</span>
+        <span className={`tabular shrink-0 text-sm ${LABEL_STYLE[label.tone]}`}>{label.text}</span>
       </span>
       <span className="mt-1.5 flex min-w-0 items-center gap-2">
         <TagChip tag={lead.tag} />
-        <span className="min-w-0 flex-1 truncate text-sm text-slate-600">{lead.reason}</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-neutral-600">{lead.reason}</span>
       </span>
-      {showRep && <span className="mt-1 block text-xs text-slate-500">Rep: {lead.repName}</span>}
+      {showRep && <span className="mt-1 block text-xs text-neutral-600">Rep: {lead.repName}</span>}
     </button>
   );
-}
+});

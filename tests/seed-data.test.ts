@@ -7,13 +7,11 @@ const SOURCES = ["IndiaMART", "Referral", "Trade show", "Website", "Cold call"];
 const words = (s: string) => s.trim().split(/\s+/).length;
 
 describe("seed data", () => {
-  const reps = SEED_REPS.filter((r) => r.role === "rep");
-  const owners = SEED_REPS.filter((r) => r.role === "owner");
+  const reps = SEED_REPS;
   const withChat = SEED_LEADS.filter((l) => l.messages.length > 0);
 
-  it("has 5 reps, 1 owner, >=20 leads, >=10 chats", () => {
+  it("has 5 reps (no owner account), >=20 leads, >=10 chats", () => {
     expect(reps).toHaveLength(5);
-    expect(owners).toHaveLength(1);
     expect(SEED_LEADS.length).toBeGreaterThanOrEqual(20);
     expect(withChat.length).toBeGreaterThanOrEqual(10);
   });
@@ -21,6 +19,12 @@ describe("seed data", () => {
   it("uses axon.demo emails and unique reps", () => {
     for (const r of SEED_REPS) expect(r.email).toMatch(/^[a-z0-9]+@axon\.demo$/);
     expect(new Set(SEED_REPS.map((r) => r.email)).size).toBe(SEED_REPS.length);
+  });
+
+  it("gives every rep a fixed, unique uuid (the seed inserts them explicitly)", () => {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    for (const r of SEED_REPS) expect(r.id).toMatch(uuid);
+    expect(new Set(SEED_REPS.map((r) => r.id)).size).toBe(SEED_REPS.length);
   });
 
   it("covers the required distribution", () => {
@@ -31,7 +35,7 @@ describe("seed data", () => {
     expect(SEED_LEADS.filter((l) => l.tag === "Warm").length).toBeGreaterThan(0);
   });
 
-  it("every lead is owned by a known rep (not the owner), reps get 4-5 each", () => {
+  it("every lead is owned by a known rep, reps get 4-5 each", () => {
     const repEmails = new Set(reps.map((r) => r.email));
     for (const l of SEED_LEADS) expect(repEmails.has(l.repEmail)).toBe(true);
     for (const r of reps) {

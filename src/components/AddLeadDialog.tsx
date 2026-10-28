@@ -1,30 +1,35 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Lead, Rep } from "@/lib/types";
-import { SOURCES, validateNewLead } from "@/lib/validate";
-import { signOutAndGoToLogin } from "@/lib/client-auth";
+import type { Lead } from "@/lib/types";
+import { PHONE_ERROR, SOURCES, validateNewLead } from "@/lib/validate";
+import { ALL_REPS, repName, type RepOption, type Viewing } from "@/lib/rep-selection";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   onCreated: (lead: Lead) => void;
   today: string;
-  isOwner: boolean;
-  reps: Rep[];
-  me: Pick<Rep, "name" | "role">;
+  reps: RepOption[];
+  // The rep the dashboard is viewing as: the new lead goes to them. With "All reps"
+  // the dialog asks for a rep instead.
+  viewing: Viewing;
 }
 
+export const REP_REQUIRED = "rep is required";
+
 const FIELD =
-  "block w-full rounded-md border border-slate-300 bg-white p-2 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 aria-[invalid=true]:border-red-500 read-only:bg-slate-50 disabled:bg-slate-50";
+  "field";
 
 // Maps the first validation message to the field it is about (messages start with the field name).
 function fieldOf(error: string): string | null {
   const names = ["name", "company", "phone", "source", "lastContactDate"];
+  if (error === REP_REQUIRED || error.startsWith("repId") || error === "Unknown rep") return "rep";
+  if (error === PHONE_ERROR) return "phone";
   return names.find((n) => error.startsWith(n)) ?? null;
 }
 
-export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, me }: Props) {
+export function AddLeadDialog({ open, onClose, onCreated, today, reps, viewing }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const mountedRef = useRef(true);
   const onCloseRef = useRef(onClose);
@@ -39,8 +44,9 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const repChoices = reps.filter((r) => r.role === "rep");
-  const effectiveRepId = repId || repChoices[0]?.id || "";
+  const pickRep = viewing === ALL_REPS;
+  const effectiveRepId = pickRep ? repId : viewing;
+  const assignee = pickRep ? null : repName(reps, viewing);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -71,15 +77,14 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (busyRef.current) return;
-    const payload: Record<string, string> = { name, company, phone, source, lastContactDate: date };
-    if (isOwner) payload.repId = effectiveRepId;
+    const payload: Record<string, string> = { name, company, phone, source, lastContactDate: date, repId: effectiveRepId };
     const v = validateNewLead(payload, today);
     if (!v.ok) {
-      setError(v.error);
+      setError(v.error.startsWith("repId") ? REP_REQUIRED : v.error);
       return;
     }
-    if (isOwner && !effectiveRepId) {
-      setError("repId is required");
+    if (!effectiveRepId || !reps.some((r) => r.id === effectiveRepId)) {
+      setError(REP_REQUIRED);
       return;
     }
     busyRef.current = true;
@@ -91,10 +96,6 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      if (res.status === 401) {
-        await signOutAndGoToLogin();
-        return;
-      }
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (mountedRef.current) setError(body.error ?? "Something went wrong");
@@ -116,7 +117,6 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
 
   const bad = error ? fieldOf(error) : null;
   const invalid = (f: string) => (bad === f ? true : undefined);
-  const owner = isOwner;
 
   return (
     <dialog
@@ -126,26 +126,26 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
         if (busyRef.current) e.preventDefault();
       }}
       onClose={() => onCloseRef.current()}
-      className="m-auto w-[calc(100vw-2rem)] max-w-md rounded-lg border border-slate-200 bg-white p-0 shadow-xl backdrop:bg-slate-900/50"
+      className="m-auto w-[calc(100vw-2rem)] max-w-md panel p-0 backdrop:bg-neutral-900/40 backdrop:backdrop-blur-[2px]"
     >
-      <form onSubmit={submit} noValidate aria-busy={busy} className="space-y-3 p-4">
-        <h2 id="add-lead-title" className="text-lg font-bold text-slate-900">
+      <form onSubmit={submit} noValidate aria-busy={busy} className="space-y-3.5 p-5 sm:p-6">
+        <h2 id="add-lead-title" className="text-xl font-semibold text-neutral-900">
           Add lead
         </h2>
         <div>
-          <label htmlFor="al-name" className="mb-1 block text-sm font-medium text-slate-800">Name</label>
+          <label htmlFor="al-name" className="mb-1 block text-sm font-medium text-neutral-900">Name</label>
           <input id="al-name" value={name} readOnly={busy} aria-invalid={invalid("name")} autoComplete="off" onChange={(e) => setName(e.target.value)} className={FIELD} />
         </div>
         <div>
-          <label htmlFor="al-company" className="mb-1 block text-sm font-medium text-slate-800">Company</label>
+          <label htmlFor="al-company" className="mb-1 block text-sm font-medium text-neutral-900">Company</label>
           <input id="al-company" value={company} readOnly={busy} aria-invalid={invalid("company")} autoComplete="off" onChange={(e) => setCompany(e.target.value)} className={FIELD} />
         </div>
         <div>
-          <label htmlFor="al-phone" className="mb-1 block text-sm font-medium text-slate-800">Phone</label>
+          <label htmlFor="al-phone" className="mb-1 block text-sm font-medium text-neutral-900">Phone</label>
           <input id="al-phone" type="text" inputMode="tel" placeholder="+91 98xxx xxxxx" value={phone} readOnly={busy} aria-invalid={invalid("phone")} autoComplete="off" onChange={(e) => setPhone(e.target.value)} className={FIELD} />
         </div>
         <div>
-          <label htmlFor="al-source" className="mb-1 block text-sm font-medium text-slate-800">Source</label>
+          <label htmlFor="al-source" className="mb-1 block text-sm font-medium text-neutral-900">Source</label>
           <select id="al-source" value={source} disabled={busy} aria-invalid={invalid("source")} onChange={(e) => setSource(e.target.value)} className={FIELD}>
             {SOURCES.map((s) => (
               <option key={s} value={s}>{s}</option>
@@ -153,23 +153,24 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
           </select>
         </div>
         <div>
-          <label htmlFor="al-date" className="mb-1 block text-sm font-medium text-slate-800">Last contact date</label>
+          <label htmlFor="al-date" className="mb-1 block text-sm font-medium text-neutral-900">Last contact date</label>
           <input id="al-date" type="date" value={date} max={today} readOnly={busy} aria-invalid={invalid("lastContactDate")} onChange={(e) => setDate(e.target.value)} className={FIELD} />
         </div>
-        {owner && (
+        {pickRep ? (
           <div>
-            <label htmlFor="al-rep" className="mb-1 block text-sm font-medium text-slate-800">Rep</label>
-            <select id="al-rep" value={effectiveRepId} disabled={busy} required onChange={(e) => setRepId(e.target.value)} className={FIELD}>
-              {repChoices.length === 0 && <option value="">No reps available</option>}
-              {repChoices.map((r) => (
+            <label htmlFor="al-rep" className="mb-1 block text-sm font-medium text-neutral-900">Rep</label>
+            <select id="al-rep" value={repId} disabled={busy} required aria-invalid={invalid("rep")} onChange={(e) => setRepId(e.target.value)} className={FIELD}>
+              <option value="">{reps.length === 0 ? "No reps available" : "Choose a rep"}</option>
+              {reps.map((r) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
             </select>
           </div>
+        ) : (
+          <p className="text-xs text-neutral-600">This lead will be assigned to {assignee ?? "the selected rep"}.</p>
         )}
-        {!owner && <p className="text-xs text-slate-500">This lead will be assigned to {me.name}.</p>}
         {error && (
-          <p role="alert" className="break-words rounded-md border border-red-200 bg-red-50 p-2 text-sm text-red-700">
+          <p role="alert" className="break-words rounded-input border border-red-200 bg-red-50 p-2.5 text-sm text-red-700">
             {error}
           </p>
         )}
@@ -178,14 +179,14 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
             type="button"
             onClick={() => onCloseRef.current()}
             disabled={busy}
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn btn-secondary"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy}
-            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn btn-primary"
           >
             {busy ? "Analysing…" : "Add lead"}
           </button>

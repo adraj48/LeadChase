@@ -1,6 +1,2 @@
-import { redirect } from "next/navigation";
-
-// Middleware sends signed-out visitors to /login before this runs.
-export default function Home() {
-  redirect("/dashboard");
-}
+// The root URL is the dashboard itself (no redirect round trip, no sign-in).
+export { default } from "./dashboard/page";

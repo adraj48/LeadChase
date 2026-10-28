@@ -1,166 +1,144 @@
-# Axon Leads: Lead Follow-up Agent
+# LeadChase
 
-A web app for a 5-rep packaging-equipment sales team. It reads each lead's WhatsApp-style chat, tags the lead Hot, Warm or Cold with a one-line reason, picks the next follow-up date, and drafts the next message, so a rep sees who to call today within seconds.
+An AI lead follow-up agent for a sales team. It reads each lead's chat, tags the lead Hot, Warm or Cold with a one-line reason, picks the next follow-up date and drafts the next message, so a rep sees who to call today within seconds.
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+<p>
+  <img src="docs/screenshots/mobile.png" alt="Mobile lead detail" width="22%">
+</p>
 
 ## Live demo
 
-- Live link: `<LIVE_URL>` (placeholder, to be replaced after deployment)
-- Password for every account: `demo1234`
+Live link: `<LIVE_URL>`
 
-| Login | Name | What it sees |
-| --- | --- | --- |
-| `rep1@axon.demo` ... `rep5@axon.demo` | Rajesh Verma, Priya Nair, Amit Sharma, Sneha Iyer, Vikram Singh | Only that rep's own leads |
-| `owner@axon.demo` | Anand Mehta | All leads from all reps, Hot/Warm/Cold counts, a rep filter, and can assign a new lead to any rep |
+The app opens straight on the dashboard. There is no login: the brief lists login as out of scope, so the demo has no authentication by design (see [Security model and limitations](#security-model-and-limitations)).
 
-## Scope note
+## Features
 
-The assignment lists login as out of scope. The project owner chose to build a Supabase email/password login anyway, so each rep sees only their own leads. The screen is built around the core flow: today's follow-ups, tag and reason, an editable draft, mark as sent, and add lead / add chat message with the agent updating the lead.
+- Today screen: leads grouped into Overdue, Due today and Upcoming, most urgent first (Hot before Warm before Cold, then most overdue).
+- "Viewing as" selector in the header: pick one of the five reps (default Sneha Iyer) to see that rep's leads, or "All reps" for the team view with Hot, Warm and Cold counts and a Rep label on each card. It is a demo control, not access control.
+- Per lead: chat thread, tag, one-line reason, follow-up date and an editable draft message.
+- Instant open: the detail header renders at once from the list data, the full lead is fetched in one database round trip, and hovering a row prefetches it into a client-side cache.
+- Mark as sent: stores the draft as a rep message and re-runs the agent over the whole chat.
+- Add a chat message or a new lead; the agent re-tags and redrafts.
+- Draft with agent: a button above the draft box asks Gemini for the next follow-up message and types it into the box word by word, in the language of the chat. Edit it, save it or send it; Undo restores the previous draft, Stop keeps what has appeared. A fact check flags prices, dates and offers that are not in the chat. Nothing is saved until you press Save draft or Mark as sent.
+- Fast replies: add message and mark sent answer straight away with a provisional tag and date; the model's final tag and draft arrive a moment later over Supabase Realtime (a managed WebSocket). If the socket is unavailable the app polls instead, so it works either way.
+- Works without a model key: a rule-based fallback keeps the app usable if Gemini is unavailable.
 
-## What it does
+## How the agent works
 
-In the order a rep uses it:
+The model (Gemini Flash) reads the chat and returns a tag, reason, follow-up gap in days and a draft. Add message and mark sent do not wait for the model: they store a rule-based provisional result, mark the lead `pending`, and write the model's result after the response. Dates are computed in code in `Asia/Kolkata`, and the gap is clamped by tag (Hot 0-1, Warm 2-5, Cold 7-14 days). Invalid output, API errors, rate limits or a 12 s timeout fall back to keyword and recency rules. Seed leads are precomputed, so the model runs only on add lead, add message and mark sent. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-1. **Log in** at `/login`. Signed-in users are sent to `/dashboard`; signed-out users are sent to `/login`.
-2. **Today screen.** A headline says how much needs attention (for example "2 overdue · 3 due today", or "Nothing due today"). Below it, leads are grouped into Overdue (red), Due today (amber) and Upcoming. Within Overdue and Due today, Hot comes before Warm before Cold, then the most overdue first; Upcoming is earliest date first, then tag. Each row shows name, company, tag chip, the agent's reason and a label such as "Overdue 8d", "Today" or "Tomorrow".
-3. **Lead detail.** Click a row to see the chat, the tag and reason, and the suggested draft message.
-4. **Edit the draft** and save it, or **Mark as sent**. Marking as sent stores the draft as a rep message, re-runs the agent over the whole chat and shows a toast such as "Sent. Next follow-up: ...".
-5. **Add a chat message** (from the buyer or the rep). The agent re-analyses the chat, so the tag, reason, follow-up date and draft can all change. A buyer message also moves the lead's last-contact date to today.
-6. **Add lead** in a pop-up (name, company, phone, source, last contact date). The agent tags it and drafts a first message.
-7. **Owner view.** Tag counts in the header and a rep filter; each row shows the rep's name.
+### Draft with agent
 
-## How the agent decides
-
-**Rubric** (given to the model in the system prompt):
-
-- Hot: the buyer asked about price, quote, delivery or a visit, or showed buying intent recently.
-- Warm: the buyer is interested but waiting on something.
-- Cold: no buyer reply for more than 14 days, or the buyer said explicitly "not now".
-
-**Dates are handled in code, not by the model.** "Today" is computed in `Asia/Kolkata` (`src/lib/dates.ts`). The model returns `followUpInDays`; the code clamps it by tag and adds it to today's date:
-
-| Tag | Allowed follow-up gap |
-| --- | --- |
-| Hot | 0 to 1 days |
-| Warm | 2 to 5 days |
-| Cold | 7 to 14 days |
-
-The model must reply with JSON (`tag`, `reason`, `followUpInDays`, `draft`). The reply is validated: an unknown tag, a blank reason or draft, or a non-numeric day count is rejected.
-
-**Rule-based fallback** (`fallbackAnalysis` in `src/lib/agent.ts`) is used when `GEMINI_API_KEY` is not set, the API errors, rate-limits or times out (12 s), or the reply fails validation. The request still succeeds, and the lead is stored with `analysis_source = 'fallback'`. The rules:
-
-- No buyer message at all: Cold.
-- Last buyer message more than 14 days ago: Cold.
-- Otherwise, if the last buyer message contains a buying word (quote, quotation, price, rate, order, buy, invoice, advance, demo, visit, delivery, with simple endings) and that message is 7 days old or less: Hot. (Day counts use the last buyer message's date in `Asia/Kolkata`; the lead's last-contact date is only used when no buyer message has a date.)
-- Any other buyer reply: Warm.
-- Follow-up gaps are 1 day (Hot), 3 days (Warm), 7 days (Cold), and the draft is a short template using the lead's first name and company.
-
-**When the model runs.** The seed leads are precomputed (tag, reason, follow-up date, draft stored as `analysis_source = 'seed'`), so loading the app never calls the model. The model runs only on add lead, add message and mark sent.
-
-**Model settings.** `GEMINI_API_KEY` and `GEMINI_MODEL` (default `gemini-2.5-flash`). The call is made from server code only, using the Gemini `generateContent` REST endpoint with JSON output, temperature 0.4 and thinking disabled (`thinkingBudget: 0`) to stay fast. The prompt tells the model not to invent facts, to match the chat's language and to treat the chat as untrusted data.
+`POST /api/leads/:id/draft-suggestion` streams one WhatsApp message as plain text and writes nothing to the database. The prompt is built in code from the whole chat: a LEAD block, a TIMELINE (days since each side last wrote, unanswered follow-ups), a FACT SHEET (prices, quantities, products, dates, rep promises, open buyer questions, language, where the buyer stands), a KNOWN vs UNKNOWN summary and a NEXT BEST ACTION chosen by rules (close politely, acknowledge a "call me later" date, answer the open question, one specific quote nudge, an easy out after repeated silence, and so on). The model is asked to write as the rep, mirror the buyer's language and length, avoid stock phrases, and say "I will confirm and revert" instead of guessing. A second layer checks the finished text for numbers, dates and offers the chat does not contain, placeholders, the wrong language and stock phrases; on a grounding or language problem the client asks for one automatic rewrite. Without a key, or if Gemini fails, a rule-based draft is streamed and labelled. The auto-draft after Add to chat / Mark as sent uses the same voice, fact sheet and next action.
 
 ## Tech stack
 
-- Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4
-- Supabase: Postgres, Auth, row level security (`@supabase/ssr`, `@supabase/supabase-js`)
-- Google Gemini (Flash) for the agent, called over REST
-- Vitest for unit tests (`npm test`)
-- Supabase CLI (pinned dev dependency) for migrations
+Next.js 15 (App Router), React 19, TypeScript, Tailwind CSS 4, Supabase (Postgres, Realtime, row level security), Google Gemini over REST, Vitest, Supabase CLI for migrations.
 
-## Data model and security
+## Getting started
 
-Schema: `supabase/migrations/*_init_schema.sql`.
+Prerequisites: Node.js 24 (see `.nvmrc`), npm, a Supabase project, and optionally a Gemini API key.
 
-- `reps`: `id` (references `auth.users`), `name`, `email`, `role` (`rep` or `owner`)
-- `leads`: `rep_id`, `name`, `company`, `phone`, `source`, `last_contact_date`, `tag`, `reason`, `follow_up_date`, `draft`, `analysis_source` (`llm`, `fallback`, `seed`)
-- `messages`: `lead_id`, `sender` (`rep` or `buyer`), `body` (non-blank), `sent_at`
+```bash
+git clone <repo-url> && cd <repo-dir>
+npm ci
+cp .env.example .env.local            # fill in the values below
+npx supabase login
+npx supabase link --project-ref <your-project-ref>
+npx supabase db push                  # applies all migrations: schema, RLS, Realtime, open demo access
+npm run seed                          # 5 reps, 150 leads, 88 chats (needs the migrations applied first)
+npm run dev                           # http://localhost:3000
+```
 
-Row level security is on for all three tables:
+### Environment variables
 
-- A rep can read, insert and update only leads where `rep_id` is their own user id; the owner can do so for all leads.
-- Messages follow their parent lead's visibility. They are append-only (no update or delete). The `reps` table is select-only for signed-in users (reps can still insert messages).
-- The owner check reads `app_metadata.role` from the JWT. That field can only be set with the service role (the seed script), never by users, unlike `user_metadata`.
-- The `anon` role has no privileges on these tables. There are no `SECURITY DEFINER` functions and no views.
-- The service role key is used only by `scripts/seed.ts`. App code always uses the signed-in user's client, so RLS applies to every request.
-- `src/middleware.ts` validates the session with `getClaims()`, redirects signed-out page requests to `/login` and returns 401 for signed-out API requests.
+| Variable | Scope | Purpose |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | public | Supabase project URL (inlined into the browser bundle) |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | public | Supabase publishable (anon) key; the browser uses it only to read `leads` for live updates |
+| `SUPABASE_SERVICE_ROLE_KEY` | server-only secret, required at runtime | Used by the API routes and `npm run seed`. Never prefix it with `NEXT_PUBLIC_` |
+| `GEMINI_API_KEY` | server-only secret | Gemini API key; if unset the rule-based fallback is used |
+| `GEMINI_MODEL` | server-only | Optional, default `gemini-2.5-flash` |
+| `SUPABASE_DB_PASSWORD` | local-only secret | Used only by the Supabase CLI; never set it on Vercel |
 
-## API routes
+`.env*` files are git-ignored except `.env.example`.
 
-All routes require a signed-in user (401 otherwise) and return JSON.
+### Demo data
 
-| Method and path | Purpose |
+The seed (24 hand-written leads plus 126 generated ones) deletes and recreates all reps, leads and messages, with dates relative to the day it runs, so overdue and due-today items always exist. It also removes any leftover `@axon.demo` users from Supabase Auth created by older versions of the seed. All names, companies and phone numbers are fictional.
+
+## Scripts
+
+| Command | Description |
 | --- | --- |
-| `GET /api/leads` | List leads, sorted by urgency, with today's date. Owner may pass `?rep=<id>` |
-| `POST /api/leads` | Add a lead; the agent tags it and drafts a message |
-| `GET /api/leads/:id` | One lead with its chat |
-| `PUT /api/leads/:id/draft` | Save an edited draft |
-| `POST /api/leads/:id/messages` | Add a buyer or rep message, then re-run the agent |
-| `POST /api/leads/:id/sent` | Mark the draft as sent: stores it as a rep message, re-runs the agent |
-| `GET /api/reps` | List reps (a rep sees only themself; the owner sees all) |
-| `POST /api/auth/logout` | Sign out |
+| `npm run dev` | Start the dev server (Turbopack) |
+| `npm run build` / `npm start` | Production build and server |
+| `npm run lint` | ESLint over `src`, `scripts`, `tests` |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm test` | Vitest unit tests |
+| `npm run check` | Lint, typecheck and tests |
+| `npm run seed` | Recreate demo reps, leads and chats (needs the service role key) |
+| `npm run eval:draft` | Offline check of the draft prompt on 14 seeded leads against Gemini (needs `GEMINI_API_KEY`; reads seed files only, no database) |
+| `npm run rls-check` | Assert anon access against a live project: can read `leads`, cannot write, cannot read `reps` or `messages` |
 
-Inputs are validated server-side (`src/lib/validate.ts`): text limited to 1000 characters, phone format, source from a fixed list, a real calendar date that is not in the future. Another rep's lead id returns 404 because RLS hides it. A repeated identical latest message is not inserted twice.
+## Testing
+
+```bash
+npm test
+npm run typecheck
+npm run lint
+npm run rls-check    # live Supabase project, uses the publishable key only
+```
+
+CI (`.github/workflows/ci.yml`) runs lint, typecheck, tests and a build on every push to `main` and every pull request, with placeholder env values and no secrets.
 
 ## Project structure
 
 ```
 src/
-  app/
-    api/            route handlers (see table above)
-    dashboard/      Dashboard.tsx (Today screen) and page
-    login/          login page
-  components/       Header, LeadRow, LeadDetail, ChatThread, AddLeadDialog, TagChip
-  lib/
-    agent.ts        rubric, Gemini call, fallback rules, clamp
-    dates.ts        IST today, date maths
-    urgency.ts      overdue/today/upcoming buckets and sorting
-    validate.ts     request validation
-    repo.ts         data access through the user-scoped client
-    supabase/       browser and server clients
-  middleware.ts     session check and redirects
-scripts/            seed-data.ts, seed.ts, rls-check.ts
-supabase/migrations/  schema and RLS
+  app/              dashboard page and API route handlers
+  components/       Header, LeadRow, LeadDetail, ChatThread, AddLeadDialog, TagChip, BrandMark
+  lib/              agent, chat, draft-* (prompt, facts, voice, check, stream), next-action, dates, urgency, validate, repo, rate limit, supabase clients
+scripts/            seed.ts, seed-data.ts, seed-bulk.ts, rls-check.ts
+supabase/           config.toml and migrations (schema, RLS, Realtime, open demo access)
 tests/              Vitest unit tests
-docs/               NOTE.md, VIDEO_SCRIPT.md
+docs/               ARCHITECTURE.md, PERFORMANCE.md, NOTE.md, VIDEO_SCRIPT.md, screenshots
 ```
 
-## Local setup
+## Security model and limitations
 
-Requires Node.js and npm (`package.json` sets no `engines` field).
+- This is a demo with fictional data and **no authentication, by design**: the brief lists login as out of scope. Anyone with the URL can view and change the demo data. The "Viewing as" selector only filters what is shown.
+- All writes go through the server API, which validates every input (`src/lib/validate.ts`). The API routes use one server-side Supabase client with the service role key; the key never reaches the browser.
+- The browser gets only the publishable key. Row level security is enabled on every table; the only policy for `anon` is read access to `leads`, which exists so Realtime can push lead updates. `anon` cannot write anything or read `reps` or `messages` (checked by `npm run rls-check`).
+- The Gemini key is used only in server code. Only `NEXT_PUBLIC_*` values are in the browser bundle.
+- Draft with agent has a best-effort in-memory limit (10 drafts a minute per client IP per server instance), so it resets on cold starts and is not shared between instances.
+- For production I would add real authentication (Supabase Auth) and per-user RLS policies, a user-scoped client in the API instead of the service role, a shared rate limiter and audit logging.
+- Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
-```bash
-npm install
-npx supabase login
-npx supabase link --project-ref <your-project-ref>
-cp .env.example .env.local        # then fill in the values
-npx supabase db push              # applies the schema and RLS
-npm run seed                      # creates the 6 demo users and 24 leads
-npm run rls-check                 # checks rep/owner/anon access with the publishable key
-npm run dev                       # http://localhost:3000
-```
+## Performance
 
-`.env.local` needs `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `GEMINI_API_KEY`, optionally `GEMINI_MODEL`, and, for local use only, `SUPABASE_SERVICE_ROLE_KEY` (seed) and `SUPABASE_DB_PASSWORD` (CLI). `.env*` files are git-ignored except `.env.example`.
+Opening a lead is a single database round trip, the detail header renders instantly from list data, and hovered rows are prefetched into a client cache. Measurements and details are in [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 
-The seed script deletes and recreates all leads, messages and demo users, with dates relative to the day it runs, so overdue and due-today items always exist. Run it again before a demo.
+## Deployment (Vercel)
 
-Other commands: `npm test`, `npm run build` (plain `next build`), `npm run lint`.
+1. Import the repository into Vercel; Next.js is detected automatically.
+2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` before the first build (`NEXT_PUBLIC_*` values are inlined at build time).
+3. Set `SUPABASE_SERVICE_ROLE_KEY` as a server-only variable and mark it Sensitive. Never give it a `NEXT_PUBLIC_` prefix.
+4. Set `GEMINI_API_KEY` (Sensitive) and optionally `GEMINI_MODEL`.
+5. Never set `SUPABASE_DB_PASSWORD` on Vercel; it is only for the local Supabase CLI.
+6. `vercel.json` pins the function region to `icn1`; pick the region closest to your Supabase project.
 
-## Deploying to Vercel
+## Known limitations and design decisions
 
-1. Import the GitHub repo into Vercel (Next.js is detected automatically).
-2. Set these environment variables BEFORE the first build: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL`. The `NEXT_PUBLIC_` values are inlined at build time, so changing them later needs a redeploy.
-3. Do NOT set `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_DB_PASSWORD` on Vercel. They are for local seeding and the CLI only.
-4. In Supabase, Authentication, URL Configuration, add the Vercel URL as the Site URL / allowed redirect.
-5. `vercel.json` pins the function region to `icn1` (Seoul, next to the Supabase project). The routes that call Gemini export `maxDuration = 60`.
+- "Mark as sent" is simulated: it records the message in the app and delivers nothing to WhatsApp.
+- Free Supabase projects pause after about 7 days idle; the app shows a retryable error until the project is resumed.
+- Gemini free-tier rate limits fall back to rule-based suggestions, which the lead detail labels.
+- Duplicate submissions are guarded in the UI and by skipping an identical repeat of the latest message; there is no database-level lock, so truly concurrent requests could interleave.
+- Next: real authentication with per-user RLS, WhatsApp Business API, evals for tags and drafts, a daily digest per rep, learning from outcomes, end-to-end tests, and an atomic mark-as-sent in one database function.
 
-## Known limitations
+## License
 
-- Free Supabase projects pause after about 7 days of inactivity. Open the site once before a review to wake it; while paused the login page shows "Can't reach the server. Try again in a minute.", and a project that pauses during use shows the error banner with a Retry button.
-- Gemini free-tier limits can cause rate-limit errors. The fallback rules then handle the lead, and the lead detail shows a "rule-based suggestion" note.
-- Rapid double-clicks are guarded by a disabled form while a request runs and by skipping an identical repeat of the latest message. There is no database-level lock, so two truly concurrent requests could still interleave.
-- One login per rep. No signup, no password reset. The demo password is shared and public.
-- Re-running the seed recreates users; sessions issued before a reseed are not revoked and stay valid until they expire.
-- Sending is simulated: "Mark as sent" records the message in the app. Nothing is delivered to WhatsApp.
-
-## Scope and what's next
-
-Not built: real WhatsApp sending and receiving, payments, analytics, signup, password reset. Next: WhatsApp Business API integration, a scheduled daily digest per rep, learning from sent-message outcomes, per-team tuning of the rubric, DOM/E2E tests, and an atomic "mark sent" done in a single database function.
+[MIT](LICENSE)

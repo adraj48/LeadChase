@@ -1,15 +1,32 @@
 {
-  "name": "axon-leads",
+  "name": "leadchase",
   "version": "0.1.0",
+  "description": "AI lead follow-up agent for a sales team: tags leads Hot/Warm/Cold, picks the next follow-up date and drafts the message.",
   "private": true,
+  "license": "MIT",
+  "author": "Aditya Kumar",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/adraj48/LeadChase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/adraj48/LeadChase/issues"
+  },
+  "homepage": "https://github.com/adraj48/LeadChase#readme",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint src scripts tests",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm test",
     "test": "vitest run --passWithNoTests",
     "seed": "tsx scripts/seed.ts",
-    "rls-check": "tsx scripts/rls-check.ts"
+    "rls-check": "tsx scripts/rls-check.ts",
+    "eval:draft": "tsx scripts/eval-draft.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

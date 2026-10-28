@@ -2,10 +2,8 @@ import { describe, it, expect } from "vitest";
 import { mapRep, mapLead, mapMessage, leadToRow } from "@/lib/mappers";
 
 describe("mappers", () => {
-  it("maps a rep row", () => {
-    expect(mapRep({ id: "r1", name: "Anil", email: "a@x.in", role: "rep" })).toEqual({
-      id: "r1", name: "Anil", email: "a@x.in", role: "rep",
-    });
+  it("maps a rep row to { id, name } only", () => {
+    expect(mapRep({ id: "r1", name: "Anil" })).toEqual({ id: "r1", name: "Anil" });
   });
 
   const leadRow = {
@@ -22,6 +20,14 @@ describe("mappers", () => {
       tag: "Hot", reason: "asked price", followUpDate: "2026-10-29", draft: "Hi",
       analysisSource: "seed",
     });
+  });
+
+  it("maps the analysis columns only when the row has them", () => {
+    const withCols = mapLead({ ...leadRow, analysis_status: "pending", analysis_started_at: "2026-10-29T10:00:00+00:00" });
+    expect(withCols.analysisStatus).toBe("pending");
+    expect(withCols.analysisStartedAt).toBe("2026-10-29T10:00:00+00:00");
+    expect(mapLead({ ...leadRow, analysis_status: "ready" }).analysisStartedAt).toBeNull();
+    expect(mapLead(leadRow)).not.toHaveProperty("analysisStatus");
   });
 
   it("handles joined rep as array, null or missing", () => {

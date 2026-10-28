@@ -1,6 +1,5 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Rep } from "@/lib/types";
-import { getCurrentRep } from "@/lib/repo";
+import { withTripCounter } from "@/lib/timing";
+import { UUID_RE } from "@/lib/validate";
 
 export class HttpError extends Error {
   constructor(
@@ -13,7 +12,7 @@ export class HttpError extends Error {
 }
 
 export const UNAVAILABLE = "Database unavailable, try again in a minute";
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export { UUID_RE };
 
 export function json(data: unknown, status = 200): Response {
   return Response.json(data, { status });
@@ -27,10 +26,17 @@ export async function readJson(req: Request): Promise<unknown> {
   }
 }
 
-export async function requireUser(sb: SupabaseClient): Promise<Rep> {
-  const me = await getCurrentRep(sb);
-  if (!me) throw new HttpError(401, "Not signed in");
-  return me;
+// Fallback key when a request carries no x-forwarded-for header (local dev, tests).
+export const UNKNOWN_CLIENT = "unknown-client";
+
+/**
+ * Best-effort client key for rate limiting: the first hop of x-forwarded-for (set by
+ * the hosting proxy, e.g. Vercel), else a shared constant. Spoofable where no trusted
+ * proxy rewrites the header, which is acceptable for a quota guard (see rate-limit.ts).
+ */
+export function clientIp(req: Request): string {
+  const first = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return first ? first.slice(0, 64) : UNKNOWN_CLIENT;
 }
 
 const NETWORK_RE =
@@ -52,7 +58,8 @@ export async function leadIdFrom(ctx: { params: Promise<{ id: string }> }): Prom
 export function withErrors<A extends any[]>(
   handler: (...args: A) => Promise<Response>,
 ): (...args: A) => Promise<Response> {
-  return async (...args: A) => {
+  // Each request gets its own Supabase request counter (development timing logs).
+  return (...args: A) => withTripCounter(async () => {
     try {
       return await handler(...args);
     } catch (e) {
@@ -62,5 +69,5 @@ export function withErrors<A extends any[]>(
       if (isDbUnavailable(e)) return json({ error: UNAVAILABLE }, 503);
       return json({ error: "Something went wrong" }, 500);
     }
-  };
+  });
 }

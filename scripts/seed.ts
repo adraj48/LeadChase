@@ -1,13 +1,20 @@
-// Idempotent demo seed. Uses the SERVICE-ROLE key: run locally only, never from app code.
+// Idempotent demo seed. Uses the SERVICE-ROLE key: run locally only. Requires the
+// open_demo_access migration (reps are plain rows, not auth accounts).
 import { config } from "dotenv";
+import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { addDays, todayIST } from "../src/lib/dates";
-import { SEED_LEADS, SEED_REPS } from "./seed-data";
+import { SEED_LEADS as HAND_LEADS, SEED_REPS } from "./seed-data";
+import { BULK_LEADS } from "./seed-bulk";
 
 config({ path: ".env.local" });
 
+// 24 hand-written leads + 126 deterministic generated ones (rep1/2/3/5 only).
+const SEED_LEADS = [...HAND_LEADS, ...BULK_LEADS];
+
+// Earlier versions created login accounts with this domain (and a published demo
+// password). They are deleted on every run so none of them can sign in any more.
 const DEMO_DOMAIN = "@axon.demo";
-const DEMO_PASSWORD = "demo1234";
 
 function must(name: string): string {
   const v = process.env[name];
@@ -26,52 +33,66 @@ function check<T>(res: { data: T; error: { message: string } | null }, what: str
   return res.data;
 }
 
+const MIGRATION_HINT =
+  "The reps table still references auth.users, so the open_demo_access migration has not been applied.\n" +
+  "Apply it first (npx supabase db push, or paste supabase/migrations/*_open_demo_access.sql into the SQL editor), then run npm run seed again. Nothing was changed.";
+
 async function main() {
   const sb = createClient(must("NEXT_PUBLIC_SUPABASE_URL"), must("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   const today = todayIST();
 
-  // 1. Remove old demo data: leads first (messages cascade; leads reference reps), then users (reps cascade).
-  check(await sb.from("leads").delete().not("id", "is", null), "delete leads");
+  // 0. Preflight before touching anything: a rep row with a random id only inserts once
+  //    the reps -> auth.users foreign key is gone. The probe row is removed right away.
+  const probeId = randomUUID();
+  const probe = await sb
+    .from("reps")
+    .insert({ id: probeId, name: "seed preflight", email: `preflight-${probeId}@seed.invalid`, role: "rep" });
+  if (probe.error) {
+    if (probe.error.code === "23503" || /foreign key/i.test(probe.error.message)) {
+      console.error(MIGRATION_HINT);
+    } else {
+      console.error(`Seed failed at "preflight": ${probe.error.message}`);
+    }
+    process.exit(1);
+  }
+  check(await sb.from("reps").delete().eq("id", probeId), "remove preflight row");
+
+  // 1. Delete leftover demo login accounts (no accounts with the old known password).
+  const demoUserIds: string[] = [];
   for (let page = 1; ; page++) {
     const { data, error } = await sb.auth.admin.listUsers({ page, perPage: 200 });
     if (error) {
       console.error(`Seed failed at "list users": ${error.message}`);
       process.exit(1);
     }
-    const demo = data.users.filter((u) => u.email?.endsWith(DEMO_DOMAIN));
-    for (const u of demo) {
-      const { error: delErr } = await sb.auth.admin.deleteUser(u.id);
-      if (delErr) {
-        console.error(`Seed failed at "delete user": ${delErr.message}`);
-        process.exit(1);
-      }
-    }
+    for (const u of data.users) if (u.email?.toLowerCase().endsWith(DEMO_DOMAIN)) demoUserIds.push(u.id);
     if (data.users.length < 200) break;
   }
-
-  // 2. Create auth users (app_metadata.role is what RLS trusts) and reps rows.
-  const idByEmail = new Map<string, string>();
-  for (const rep of SEED_REPS) {
-    const { data, error } = await sb.auth.admin.createUser({
-      email: rep.email,
-      password: DEMO_PASSWORD,
-      email_confirm: true,
-      app_metadata: { role: rep.role },
-    });
-    if (error || !data.user) {
-      console.error(`Seed failed at "create user": ${error?.message ?? "no user returned"}`);
+  for (const id of demoUserIds) {
+    const { error } = await sb.auth.admin.deleteUser(id);
+    if (error) {
+      console.error(`Seed failed at "delete user": ${error.message}`);
       process.exit(1);
     }
-    idByEmail.set(rep.email, data.user.id);
   }
+  const deletedUsers = demoUserIds.length;
+
+  // 2. Remove old demo data: leads (messages cascade), then every reps row that is not
+  //    one of the five fixed reps (the retired owner row, ids of old auth accounts).
+  check(await sb.from("leads").delete().not("id", "is", null), "delete leads");
+  const keep = SEED_REPS.map((r) => r.id);
+  check(await sb.from("reps").delete().not("id", "in", `(${keep.join(",")})`), "delete old reps");
+
+  // 3. The five reps, with explicit ids (upsert: re-running changes nothing).
   check(
-    await sb.from("reps").insert(
-      SEED_REPS.map((r) => ({ id: idByEmail.get(r.email)!, name: r.name, email: r.email, role: r.role })),
-    ),
-    "insert reps",
+    await sb
+      .from("reps")
+      .upsert(SEED_REPS.map((r) => ({ id: r.id, name: r.name, email: r.email, role: "rep" })), { onConflict: "id" }),
+    "upsert reps",
   );
+  const idByEmail = new Map(SEED_REPS.map((r) => [r.email, r.id]));
 
   // 3. Leads, then messages, resolving day offsets against today (IST).
   const inserted = check(
@@ -107,7 +128,8 @@ async function main() {
   );
   check(await sb.from("messages").insert(messages), "insert messages");
 
-  console.log(`Seeded ${SEED_REPS.length} users, ${SEED_LEADS.length} leads, ${messages.length} messages (today = ${today}).`);
+  console.log(`Deleted ${deletedUsers} demo login account(s).`);
+  console.log(`Seeded ${SEED_REPS.length} reps, ${SEED_LEADS.length} leads, ${messages.length} messages (today = ${today}).`);
 }
 
 main().catch((e) => {

@@ -1,17 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@/lib/supabase/server", () => ({ createServerSupabase: vi.fn(async () => ({})) }));
+vi.mock("@/lib/supabase/server", () => ({ getServerSupabase: vi.fn(() => ({})) }));
 vi.mock("@/lib/repo", () => ({
-  getCurrentRep: vi.fn(),
   listReps: vi.fn(),
+  getRep: vi.fn(),
   listLeads: vi.fn(),
   getLead: vi.fn(),
   createLead: vi.fn(),
   addMessage: vi.fn(),
   saveAnalysis: vi.fn(),
   saveDraft: vi.fn(),
+  beginAnalysis: vi.fn(),
+  finishAnalysis: vi.fn(),
+  markReady: vi.fn(),
 }));
-vi.mock("@/lib/agent", () => ({ analyzeLead: vi.fn() }));
+vi.mock("@/lib/agent", async (orig) => ({
+  ...(await orig<typeof import("@/lib/agent")>()),
+  analyzeLead: vi.fn(),
+}));
+// next/server's after() only works inside a real request: capture the callbacks and
+// let each test run them explicitly (flush), which also proves the response did not wait.
+const afterJobs: (() => unknown)[] = [];
+vi.mock("next/server", () => ({ after: (fn: () => unknown) => void afterJobs.push(fn) }));
+async function flush() {
+  while (afterJobs.length) await afterJobs.shift()!();
+}
 
 import * as repo from "@/lib/repo";
 import { analyzeLead } from "@/lib/agent";
@@ -29,9 +42,9 @@ const agent = vi.mocked(analyzeLead);
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
-const rep = { id: "33333333-3333-4333-8333-333333333333", name: "Rep", email: "r@x.in", role: "rep" as const };
-const owner = { id: "44444444-4444-4444-8444-444444444444", name: "Boss", email: "o@x.in", role: "owner" as const };
+const rep = { id: "33333333-3333-4333-8333-333333333333", name: "Rep" };
 const ctx = (id: string) => ({ params: Promise.resolve({ id }) });
+// No cookie and no auth header on any request: there is no login.
 const req = (method: string, body?: unknown, url = "http://t/api/x") =>
   new Request(url, {
     method,
@@ -47,91 +60,134 @@ const mkLead = (over = {}) => ({
 const chat = (over = {}) => ({ lead: mkLead(over), messages: [{ id: "m1", leadId: ID, from: "rep" as const, text: "hi", at: "2026-10-02T00:00:00Z" }] });
 const result = { tag: "Hot" as const, reason: "x", followUpDate: "2026-10-29", draft: "dd", analysisSource: "llm" as const };
 
+const pendingLead = (p: { tag: "Hot" | "Warm" | "Cold"; reason: string; followUpDate: string }, startedAt: string) =>
+  mkLead({ tag: p.tag, reason: p.reason, followUpDate: p.followUpDate, analysisStatus: "pending", analysisStartedAt: startedAt });
+
 beforeEach(() => {
   vi.resetAllMocks();
+  afterJobs.length = 0;
   vi.spyOn(console, "error").mockImplementation(() => {});
-  m.getCurrentRep.mockResolvedValue(rep);
+  m.getRep.mockResolvedValue(rep);
   agent.mockResolvedValue(result);
+  m.beginAnalysis.mockImplementation(async (_sb, _id, p, startedAt) => ({ kind: "ok", lead: pendingLead(p, startedAt) }));
+  m.finishAnalysis.mockResolvedValue(true);
+  m.markReady.mockResolvedValue(undefined);
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("401 when no rep", () => {
-  beforeEach(() => m.getCurrentRep.mockResolvedValue(null));
-  const check = async (p: Promise<Response>) => {
-    const r = await p;
-    expect(r.status).toBe(401);
-    expect(await r.json()).toEqual({ error: "Not signed in" });
-  };
-  it("GET /api/leads", () => check(leadsGET(req("GET"))));
-  it("POST /api/leads", () => check(leadsPOST(req("POST", {}))));
-  it("GET /api/leads/[id]", () => check(leadGET(req("GET"), ctx(ID))));
-  it("POST messages", () => check(messagesPOST(req("POST", { from: "rep", text: "x" }), ctx(ID))));
-  it("POST sent", () => check(sentPOST(req("POST", { draft: "x" }), ctx(ID))));
-  it("PUT draft", () => check(draftPUT(req("PUT", { draft: "x" }), ctx(ID))));
-  it("GET /api/reps", () => check(repsGET(req("GET"))));
-  it("does not touch data", async () => {
-    await leadsGET(req("GET"));
-    expect(m.listLeads).not.toHaveBeenCalled();
+describe("no login: requests without any cookie or auth header succeed", () => {
+  it("every route answers without a session", async () => {
+    m.listLeads.mockResolvedValue([]);
+    m.listReps.mockResolvedValue([rep]);
+    m.getLead.mockResolvedValue(chat());
+    m.saveDraft.mockResolvedValue(true);
+    m.createLead.mockResolvedValue(mkLead());
+    m.addMessage.mockResolvedValue({ id: "m2", leadId: ID, from: "rep", text: "x", at: "t" });
+    const body = { name: "A", company: "B", phone: "+919123456780", source: "Website", lastContactDate: "2026-10-01", repId: rep.id };
+    const responses = [
+      await leadsGET(req("GET", undefined, "http://t/api/leads")),
+      await leadsPOST(req("POST", body)),
+      await leadGET(req("GET"), ctx(ID)),
+      await messagesPOST(req("POST", { from: "rep", text: "x" }), ctx(ID)),
+      await sentPOST(req("POST", { draft: "y" }), ctx(ID)),
+      await draftPUT(req("PUT", { draft: "x" }), ctx(ID)),
+      await repsGET(req("GET")),
+    ];
+    for (const r of responses) {
+      expect(r.status).not.toBe(401);
+      expect(r.status).toBeLessThan(300);
+    }
   });
 });
 
 describe("GET /api/leads", () => {
-  it("returns sorted leads, today and me", async () => {
+  it("returns sorted leads, today and the fixed all-reps viewer", async () => {
     const a = mkLead({ id: "a", followUpDate: "2099-01-01", tag: "Hot" });
     const b = mkLead({ id: "b", followUpDate: "2000-01-01", tag: "Cold" });
     m.listLeads.mockResolvedValue([a, b]);
     const r = await leadsGET(req("GET", undefined, "http://t/api/leads"));
     const j = await r.json();
     expect(r.status).toBe(200);
+    expect(Object.keys(j)).toEqual(["today", "me", "leads"]);
     expect(j.today).toBe(todayIST());
-    expect(j.me).toEqual(rep);
+    expect(j.me).toEqual({ id: "all", name: "All reps", email: "", role: "owner" });
     expect(j.leads.map((l: { id: string }) => l.id)).toEqual(["b", "a"]);
   });
-  it("ignores ?rep= for a rep", async () => {
-    m.listLeads.mockResolvedValue([]);
-    await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`));
-    expect(m.listLeads).toHaveBeenCalledTimes(1);
-    expect(m.listLeads.mock.calls[0][1]).toBeUndefined();
+  it("no ?rep= and ?rep=all list every rep's leads in one query", async () => {
+    m.listLeads.mockResolvedValue([mkLead()]);
+    await leadsGET(req("GET", undefined, "http://t/api/leads"));
+    await leadsGET(req("GET", undefined, "http://t/api/leads?rep=all"));
+    expect(m.listLeads.mock.calls.map((c) => c[1])).toEqual([undefined, undefined]);
+    expect(m.getRep).not.toHaveBeenCalled();
   });
-  it("honours ?rep= for the owner", async () => {
-    m.getCurrentRep.mockResolvedValue(owner);
-    m.listLeads.mockResolvedValue([]);
-    await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`));
+  it("?rep=<uuid> filters by that rep, one query when it has leads", async () => {
+    m.listLeads.mockResolvedValue([mkLead({ repId: OTHER })]);
+    const r = await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`));
+    expect(r.status).toBe(200);
     expect(m.listLeads.mock.calls[0][1]).toBe(OTHER);
+    expect(m.getRep).not.toHaveBeenCalled();
   });
-  it("ignores a non-uuid ?rep= for the owner", async () => {
-    m.getCurrentRep.mockResolvedValue(owner);
+  it("a known rep without leads => 200 with an empty list", async () => {
     m.listLeads.mockResolvedValue([]);
-    await leadsGET(req("GET", undefined, "http://t/api/leads?rep=nope"));
-    expect(m.listLeads.mock.calls[0][1]).toBeUndefined();
+    m.getRep.mockResolvedValue({ id: OTHER, name: "Other" });
+    const r = await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`));
+    expect(r.status).toBe(200);
+    expect((await r.json()).leads).toEqual([]);
+    expect(m.getRep).toHaveBeenCalledWith(expect.anything(), OTHER);
+  });
+  it("an unknown rep => 400", async () => {
+    m.listLeads.mockResolvedValue([]);
+    m.getRep.mockResolvedValue(null);
+    const r = await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "Unknown rep" });
+  });
+  it("a malformed ?rep= => 400 without querying", async () => {
+    const r = await leadsGET(req("GET", undefined, "http://t/api/leads?rep=nope"));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "Invalid rep" });
+    expect(m.listLeads).not.toHaveBeenCalled();
   });
 });
 
 describe("POST /api/leads", () => {
-  const body = { name: "A", company: "B", phone: "+911234567890", source: "Website", lastContactDate: "2026-10-01" };
-  it("rep cannot choose another rep", async () => {
-    m.createLead.mockResolvedValue(mkLead());
-    const r = await leadsPOST(req("POST", { ...body, repId: OTHER }));
+  const body = { name: "A", company: "B", phone: "+919123456780", source: "Website", lastContactDate: "2026-10-01", repId: OTHER };
+  it("creates the lead for the chosen rep, with that rep's name for the model", async () => {
+    m.getRep.mockResolvedValue({ id: OTHER, name: "Other Rep" });
+    m.createLead.mockResolvedValue(mkLead({ repId: OTHER }));
+    const r = await leadsPOST(req("POST", body));
     expect(r.status).toBe(201);
-    expect(m.createLead.mock.calls[0][1]).toBe(rep.id);
-    expect(agent).toHaveBeenCalledWith(expect.objectContaining({ messages: [] }));
+    expect(m.getRep).toHaveBeenCalledWith(expect.anything(), OTHER);
+    expect(m.createLead.mock.calls[0][1].repId).toBe(OTHER);
+    expect(agent).toHaveBeenCalledWith(expect.objectContaining({ messages: [], repName: "Other Rep" }));
   });
-  it("owner may choose a rep", async () => {
-    m.getCurrentRep.mockResolvedValue(owner);
-    m.createLead.mockResolvedValue(mkLead());
-    await leadsPOST(req("POST", { ...body, repId: OTHER }));
-    expect(m.createLead.mock.calls[0][1]).toBe(OTHER);
+  it("missing repId => 400, nothing looked up or written", async () => {
+    const { repId: _drop, ...noRep } = body;
+    void _drop;
+    const r = await leadsPOST(req("POST", noRep));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "repId is required" });
+    expect(m.getRep).not.toHaveBeenCalled();
+    expect(m.createLead).not.toHaveBeenCalled();
   });
-  it("owner defaults to own id", async () => {
-    m.getCurrentRep.mockResolvedValue(owner);
-    m.createLead.mockResolvedValue(mkLead());
-    await leadsPOST(req("POST", body));
-    expect(m.createLead.mock.calls[0][1]).toBe(owner.id);
+  it("malformed repId => 400, nothing looked up or written", async () => {
+    const r = await leadsPOST(req("POST", { ...body, repId: "nope" }));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "repId is invalid" });
+    expect(m.getRep).not.toHaveBeenCalled();
+    expect(m.createLead).not.toHaveBeenCalled();
   });
-  it("unknown rep FK violation => 400", async () => {
-    m.getCurrentRep.mockResolvedValue(owner);
+  it("unknown rep => 400 before any model call", async () => {
+    m.getRep.mockResolvedValue(null);
+    const r = await leadsPOST(req("POST", body));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "Unknown rep" });
+    expect(agent).not.toHaveBeenCalled();
+    expect(m.createLead).not.toHaveBeenCalled();
+  });
+  it("rep deleted between lookup and insert (FK violation) => 400", async () => {
     m.createLead.mockRejectedValue(new Error("Supabase error: insert violates foreign key constraint \"leads_rep_id_fkey\""));
-    const r = await leadsPOST(req("POST", { ...body, repId: OTHER }));
+    const r = await leadsPOST(req("POST", body));
     expect(r.status).toBe(400);
     expect(await r.json()).toEqual({ error: "Unknown rep" });
   });
@@ -157,6 +213,14 @@ describe("GET /api/leads/[id]", () => {
   it("404 when missing", async () => {
     m.getLead.mockResolvedValue(null);
     expect((await leadGET(req("GET"), ctx(ID))).status).toBe(404);
+  });
+  it("reads lead and chat with a single repo call", async () => {
+    m.getLead.mockResolvedValue(chat());
+    await leadGET(req("GET"), ctx(ID));
+    expect(m.getLead).toHaveBeenCalledTimes(1);
+    expect(m.getLead).toHaveBeenCalledWith(expect.anything(), ID);
+    expect(m.listLeads).not.toHaveBeenCalled();
+    expect(m.getRep).not.toHaveBeenCalled();
   });
   it("404 on invalid uuid without querying", async () => {
     const r = await leadGET(req("GET"), ctx("not-a-uuid"));
@@ -191,18 +255,16 @@ describe("POST messages", () => {
   it("buyer message sets lastContactDate to today", async () => {
     m.getLead.mockResolvedValue(chat());
     m.addMessage.mockResolvedValue({ id: "m2", leadId: ID, from: "buyer", text: "x", at: "t" });
-    m.saveAnalysis.mockResolvedValue(true);
     const r = await messagesPOST(req("POST", { from: "buyer", text: " x " }), ctx(ID));
     expect(r.status).toBe(200);
     expect(m.addMessage).toHaveBeenCalledWith(expect.anything(), ID, "buyer", "x");
-    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
+    expect(m.beginAnalysis.mock.calls[0][4]).toBe(todayIST());
   });
   it("rep message leaves lastContactDate unchanged", async () => {
     m.getLead.mockResolvedValue(chat());
     m.addMessage.mockResolvedValue({ id: "m2", leadId: ID, from: "rep", text: "x", at: "t" });
-    m.saveAnalysis.mockResolvedValue(true);
     await messagesPOST(req("POST", { from: "rep", text: "x" }), ctx(ID));
-    expect(m.saveAnalysis.mock.calls[0][3]).toBeUndefined();
+    expect(m.beginAnalysis.mock.calls[0][4]).toBeUndefined();
   });
 });
 
@@ -222,34 +284,167 @@ describe("POST sent", () => {
     const r = await sentPOST(req("POST", "{"), ctx(ID));
     expect(r.status).toBe(400);
   });
-  it("happy path: addMessage -> analyzeLead -> saveAnalysis, returns re-read chat", async () => {
+  it("happy path: addMessage -> provisional write -> response, then model -> final write", async () => {
     const order: string[] = [];
-    const after = chat({ tag: "Hot" });
-    m.getLead
-      .mockImplementationOnce(async () => { order.push("getLead1"); return chat(); })
-      .mockImplementationOnce(async () => { order.push("getLead2"); return after; })
-      .mockImplementationOnce(async () => { order.push("getLead3"); return after; });
-    m.addMessage.mockImplementation(async () => { order.push("addMessage"); return { id: "m", leadId: ID, from: "rep", text: "hi", at: "t" }; });
+    m.getLead.mockImplementationOnce(async () => { order.push("getLead"); return chat(); });
+    const added = { id: "m", leadId: ID, from: "rep" as const, text: "hello", at: "2026-10-29T00:00:00Z" };
+    m.addMessage.mockImplementation(async () => { order.push("addMessage"); return added; });
+    m.beginAnalysis.mockImplementation(async (_sb, _id, p, startedAt) => {
+      order.push("begin");
+      return { kind: "ok", lead: pendingLead(p, startedAt) };
+    });
     agent.mockImplementation(async () => { order.push("analyze"); return result; });
-    m.saveAnalysis.mockImplementation(async () => { order.push("save"); return true; });
+    m.finishAnalysis.mockImplementation(async () => { order.push("finish"); return true; });
     const r = await sentPOST(req("POST", { draft: " hello " }), ctx(ID));
     expect(r.status).toBe(200);
-    expect(order.indexOf("addMessage")).toBeLessThan(order.indexOf("analyze"));
-    expect(order.indexOf("analyze")).toBeLessThan(order.indexOf("save"));
+    // The model has not run when the response is returned.
+    expect(order).toEqual(["getLead", "addMessage", "begin"]);
+    expect(agent).not.toHaveBeenCalled();
     expect(m.addMessage).toHaveBeenCalledWith(expect.anything(), ID, "rep", "hello");
-    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
-    expect(agent.mock.calls[0][0].messages[0]).toEqual({ from: "rep", text: "hi", at: "2026-10-02T00:00:00Z" });
-    expect(await r.json()).toEqual(after);
+    const body = await r.json();
+    expect(body.lead.analysisStatus).toBe("pending");
+    expect(body.messages).toEqual([...chat().messages, added]);
+    // Provisional values come from the rules, never from the model.
+    const [, , prov, startedAt, lastContact] = m.beginAnalysis.mock.calls[0];
+    expect(prov.analysisSource).toBe("fallback");
+    expect(lastContact).toBe(todayIST());
+    expect(body.lead.analysisStartedAt).toBe(startedAt);
+    await flush();
+    expect(order).toEqual(["getLead", "addMessage", "begin", "analyze", "finish"]);
+    expect(agent.mock.calls[0][0].messages).toEqual([
+      { from: "rep", text: "hi", at: "2026-10-02T00:00:00Z" },
+      { from: "rep", text: "hello", at: "2026-10-29T00:00:00Z" },
+    ]);
+    expect(m.finishAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, startedAt);
   });
-  it("fallback analysis is still saved and returned", async () => {
+  it("fallback analysis is still written as the final result", async () => {
     const fb = { ...result, analysisSource: "fallback" as const };
     agent.mockResolvedValue(fb);
     m.getLead.mockResolvedValue(chat());
     m.addMessage.mockResolvedValue({ id: "m", leadId: ID, from: "rep", text: "hi", at: "t" });
-    m.saveAnalysis.mockResolvedValue(true);
     const r = await sentPOST(req("POST", { draft: "hello" }), ctx(ID));
     expect(r.status).toBe(200);
-    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, fb, todayIST());
+    await flush();
+    expect(m.finishAnalysis).toHaveBeenCalledWith(expect.anything(), ID, fb, expect.any(String));
+  });
+});
+
+describe("fast path", () => {
+  const setup = () => {
+    m.getLead.mockResolvedValue(chat());
+    m.addMessage.mockResolvedValue({ id: "m2", leadId: ID, from: "buyer", text: "x", at: "t" });
+  };
+  it("responds without waiting for a model that never answers", async () => {
+    setup();
+    agent.mockImplementation(() => new Promise(() => {}));
+    const r = await messagesPOST(req("POST", { from: "buyer", text: "price?" }), ctx(ID));
+    expect(r.status).toBe(200);
+    expect(m.finishAnalysis).not.toHaveBeenCalled();
+    expect(afterJobs).toHaveLength(1);
+  });
+  it("does not re-read the chat after writing (one read, one insert, one update)", async () => {
+    setup();
+    await messagesPOST(req("POST", { from: "buyer", text: "price?" }), ctx(ID));
+    expect(m.getLead).toHaveBeenCalledTimes(1);
+    expect(m.addMessage).toHaveBeenCalledTimes(1);
+    expect(m.beginAnalysis).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(m.getLead).toHaveBeenCalledTimes(1);
+  });
+  it("sends the insert and the provisional write together (two round trips, not three)", async () => {
+    m.getLead.mockResolvedValue(chat());
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    m.addMessage.mockImplementation(async () => {
+      await gate;
+      return { id: "m2", leadId: ID, from: "buyer", text: "x", at: "t" };
+    });
+    const pending = messagesPOST(req("POST", { from: "buyer", text: "price?" }), ctx(ID));
+    await vi.waitFor(() => expect(m.beginAnalysis).toHaveBeenCalledTimes(1));
+    // beginAnalysis started while the insert was still in flight.
+    release();
+    expect((await pending).status).toBe(200);
+  });
+  it("provisional result already accounts for the new message", async () => {
+    setup();
+    await messagesPOST(req("POST", { from: "buyer", text: "please share the price quote today" }), ctx(ID));
+    const prov = m.beginAnalysis.mock.calls[0][2];
+    expect(prov.analysisSource).toBe("fallback");
+    await flush();
+    // The model gets the stored message (server timestamp), not the local stand-in.
+    expect(agent.mock.calls[0][0].messages.at(-1)).toEqual({ from: "buyer", text: "x", at: "t" });
+  });
+  it("insert fails after the provisional write => error, lead marked ready, no background job", async () => {
+    m.getLead.mockResolvedValue(chat());
+    m.addMessage.mockRejectedValue(new Error("fetch failed"));
+    const r = await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    expect(r.status).toBe(503);
+    expect(m.markReady).toHaveBeenCalledTimes(1);
+    expect(m.markReady.mock.calls[0][2]).toBe(m.beginAnalysis.mock.calls[0][3]);
+    expect(afterJobs).toHaveLength(0);
+  });
+  it("lead deleted mid-request (insert returns null) => 404, lead marked ready", async () => {
+    m.getLead.mockResolvedValue(chat());
+    m.addMessage.mockResolvedValue(null);
+    const r = await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    expect(r.status).toBe(404);
+    expect(m.markReady).toHaveBeenCalledTimes(1);
+    expect(afterJobs).toHaveLength(0);
+  });
+  it("provisional write fails => error, no background job", async () => {
+    setup();
+    m.beginAnalysis.mockRejectedValue(new Error("fetch failed"));
+    const r = await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    expect(r.status).toBe(503);
+    expect(m.markReady).not.toHaveBeenCalled();
+    expect(afterJobs).toHaveLength(0);
+  });
+  it("beginAnalysis not-found => 404 and no background job", async () => {
+    setup();
+    m.beginAnalysis.mockResolvedValue({ kind: "not-found" });
+    expect((await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID))).status).toBe(404);
+    expect(afterJobs).toHaveLength(0);
+  });
+  it("database without the analysis columns: analyses before replying, no background job", async () => {
+    setup();
+    m.beginAnalysis.mockResolvedValue({ kind: "legacy" });
+    m.saveAnalysis.mockResolvedValue(true);
+    const r = await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    expect(r.status).toBe(200);
+    expect(agent).toHaveBeenCalledTimes(1);
+    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
+    expect(afterJobs).toHaveLength(0);
+    expect(m.finishAnalysis).not.toHaveBeenCalled();
+  });
+  it("a model that throws still ends ready, with the rule-based result", async () => {
+    setup();
+    agent.mockRejectedValue(new Error("boom"));
+    await messagesPOST(req("POST", { from: "buyer", text: "what is the price" }), ctx(ID));
+    await flush();
+    const written = m.finishAnalysis.mock.calls[0][2];
+    expect(written.analysisSource).toBe("fallback");
+    expect(written.draft.length).toBeGreaterThan(0);
+  });
+  it("a failed final write is retried once, then the lead is at least marked ready", async () => {
+    setup();
+    m.finishAnalysis.mockRejectedValue(new Error("fetch failed"));
+    await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    await flush();
+    expect(m.finishAnalysis).toHaveBeenCalledTimes(2);
+    expect(m.markReady).toHaveBeenCalledTimes(1);
+  });
+  it("never throws out of the background job, even if markReady also fails", async () => {
+    setup();
+    m.finishAnalysis.mockRejectedValue(new Error("fetch failed"));
+    m.markReady.mockRejectedValue(new Error("fetch failed"));
+    await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    await expect(flush()).resolves.toBeUndefined();
+  });
+  it("a retried duplicate still starts an analysis", async () => {
+    m.getLead.mockResolvedValue({ ...chat(), messages: [{ id: "m1", leadId: ID, from: "buyer", text: "x", at: "2026-10-03T00:00:00Z" }] });
+    await messagesPOST(req("POST", { from: "buyer", text: "x" }), ctx(ID));
+    expect(m.addMessage).not.toHaveBeenCalled();
+    expect(afterJobs).toHaveLength(1);
   });
 });
 
@@ -270,9 +465,13 @@ describe("PUT draft", () => {
 });
 
 describe("GET /api/reps", () => {
-  it("returns reps", async () => {
-    m.listReps.mockResolvedValue([rep]);
-    expect(await (await repsGET(req("GET"))).json()).toEqual({ reps: [rep] });
+  it("returns { reps: { id, name }[] }", async () => {
+    const reps = [{ id: OTHER, name: "Amit" }, rep];
+    m.listReps.mockResolvedValue(reps);
+    const r = await repsGET(req("GET"));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ reps });
+    expect(m.listReps).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -283,8 +482,8 @@ describe("error mapping", () => {
     expect(r.status).toBe(503);
     expect(await r.json()).toEqual({ error: "Database unavailable, try again in a minute" });
   });
-  it("getCurrentRep network failure => 503", async () => {
-    m.getCurrentRep.mockRejectedValue(new Error("fetch failed"));
+  it("reps network failure => 503", async () => {
+    m.listReps.mockRejectedValue(new Error("fetch failed"));
     expect((await repsGET(req("GET"))).status).toBe(503);
   });
   it("unknown error => 500 without leaking", async () => {
@@ -302,7 +501,6 @@ describe("retry guard (no duplicate message)", () => {
     c.messages.push(msg(from, text));
     m.getLead.mockResolvedValue(c);
     m.addMessage.mockResolvedValue(msg("rep", "n"));
-    m.saveAnalysis.mockResolvedValue(true);
     return c;
   };
 
@@ -311,9 +509,11 @@ describe("retry guard (no duplicate message)", () => {
     const r = await sentPOST(req("POST", { draft: "Hi" }), ctx(ID));
     expect(r.status).toBe(200);
     expect(m.addMessage).not.toHaveBeenCalled();
+    expect(m.beginAnalysis).toHaveBeenCalled();
+    await flush();
     expect(agent).toHaveBeenCalled();
-    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
-    expect(await r.json()).toEqual(c);
+    expect(m.finishAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, expect.any(String));
+    expect((await r.json()).messages).toEqual(c.messages);
   });
   it("/sent: same text from the buyer still adds", async () => {
     withLatest("buyer", "Hi");
@@ -335,8 +535,9 @@ describe("retry guard (no duplicate message)", () => {
     const r = await messagesPOST(req("POST", { from: "buyer", text: " Price? " }), ctx(ID));
     expect(r.status).toBe(200);
     expect(m.addMessage).not.toHaveBeenCalled();
+    await flush();
     expect(agent).toHaveBeenCalled();
-    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
+    expect(m.finishAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, expect.any(String));
   });
   it("/messages: same text, different from => adds", async () => {
     withLatest("buyer", "Price?");

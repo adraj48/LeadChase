@@ -2,12 +2,15 @@
 // (negative = past). tag/reason/followUpOffset/draft are precomputed so the
 // demo never calls the LLM. followUpOffset = lastContactOffset + a gap that
 // respects the tag clamp (Hot 0-1, Warm 2-5, Cold 7-14).
-import type { Role, Tag } from "../src/lib/types";
+import type { Tag } from "../src/lib/types";
 
+// The five sales reps. Fixed ids keep the seed idempotent and links stable across
+// re-seeds. The emails are only labels (unique column, and the key leads use below):
+// there are no login accounts.
 export interface SeedRep {
+  id: string;
   email: string;
   name: string;
-  role: Role;
 }
 
 export interface SeedMessage {
@@ -32,12 +35,11 @@ export interface SeedLead {
 }
 
 export const SEED_REPS: SeedRep[] = [
-  { email: "rep1@axon.demo", name: "Rajesh Verma", role: "rep" },
-  { email: "rep2@axon.demo", name: "Priya Nair", role: "rep" },
-  { email: "rep3@axon.demo", name: "Amit Sharma", role: "rep" },
-  { email: "rep4@axon.demo", name: "Sneha Iyer", role: "rep" },
-  { email: "rep5@axon.demo", name: "Vikram Singh", role: "rep" },
-  { email: "owner@axon.demo", name: "Anand Mehta", role: "owner" },
+  { id: "5e3d0000-0000-4000-8000-000000000001", email: "rep1@axon.demo", name: "Rajesh Verma" },
+  { id: "5e3d0000-0000-4000-8000-000000000002", email: "rep2@axon.demo", name: "Priya Nair" },
+  { id: "5e3d0000-0000-4000-8000-000000000003", email: "rep3@axon.demo", name: "Amit Sharma" },
+  { id: "5e3d0000-0000-4000-8000-000000000004", email: "rep4@axon.demo", name: "Sneha Iyer" },
+  { id: "5e3d0000-0000-4000-8000-000000000005", email: "rep5@axon.demo", name: "Vikram Singh" },
 ];
 
 const r = (dayOffset: number, time: string, text: string): SeedMessage => ({ from: "rep", dayOffset, time, text });
@@ -49,7 +51,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Sunil Agarwal", company: "Agarwal Foods Pvt Ltd", phone: "+91 90000 00001", source: "IndiaMART",
     repEmail: "rep1@axon.demo", lastContactOffset: -1, tag: "Hot", followUpOffset: 0,
     reason: "Asked delivery time for 4-head pouch machine, may order this week; partner still to review.",
-    draft: "Namaste Sunil ji, kal ki baat ke hisaab se maine 3 hafte ka delivery slot hold kar liya hai. Aapke partner ke liye 2 minute ka machine video bhej raha hoon. Kya aaj shaam 5 baje 10 minute call kar sakte hain taaki order finalise ho jaaye?",
+    draft: "Namaste Sunil ji, kal aapne kaha tha ki aaj baat karte hain. Delivery normally 3 hafte hai aur 50% advance pe slot block ho sakta hai. Kya main aapke partner ke liye machine ka video bhej doon, aur kya aaj 10 minute call ho sakta hai?",
     messages: [
       r(-4, "11:05", "Namaste Sunil ji, Axon Packaging se. IndiaMART pe aapne pouch packing machine ki enquiry daali thi. Namkeen ke liye hai na?"),
       b(-4, "11:40", "Haan, namkeen 200g aur 500g pouch. Daily 3000 pouch chahiye."),
@@ -63,7 +65,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Rakesh Jain", company: "Jain Spices", phone: "+91 90000 00002", source: "IndiaMART",
     repEmail: "rep1@axon.demo", lastContactOffset: -4, tag: "Warm", followUpOffset: -1,
     reason: "Asked for demo video after price; rep sent it, no reaction for 4 days.",
-    draft: "Rakesh ji, kya aapne band sealer ka demo video dekha? 1500 pouch per hour aaram se nikalta hai. Agar aap chahein to Jaipur ke ek masala customer se baat karwa sakta hoon jo yahi machine chalate hain. Kya main unka number bhej doon?",
+    draft: "Rakesh ji, kya aapne band sealer ka demo video dekha? Aapko 1500 pouch per hour chahiye, to dekh ke bataiye ki machine aapke kaam ki lagti hai ya nahi. Chahein to call par baat kar lein?",
     messages: [
       b(-7, "15:20", "Need sealing machine for masala pouches 50g 100g. Price?"),
       r(-7, "15:50", "Rakesh ji, continuous band sealer Rs 38,000 with date coder option. Aapko kitne pouch per hour chahiye?"),
@@ -87,7 +89,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Shalini Bose", company: "Bose Sweets", phone: "+91 90000 00004", source: "Cold call",
     repEmail: "rep1@axon.demo", lastContactOffset: -15, tag: "Cold", followUpOffset: -5,
     reason: "Cold call 15 days ago pitching carton sealing; no interest shown or reply since.",
-    draft: "Hello Shalini ji, humne sweet boxes ke carton sealing ke baare mein baat ki thi. busy season mein kya sealing mein dikkat aati hai, ya main rush ke baad dobara contact karoon?",
+    draft: "Hello Shalini ji, humne sweet boxes ke carton sealing ke baare mein baat ki thi. Busy season mein kya sealing mein dikkat aati hai, ya main rush ke baad dobara contact karoon?",
     messages: [],
   },
   {
@@ -102,7 +104,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Dr. Kavita Reddy", company: "Reddy Pharma Labs", phone: "+91 90000 00006", source: "Trade show",
     repEmail: "rep2@axon.demo", lastContactOffset: -1, tag: "Hot", followUpOffset: 0,
     reason: "Quote within budget; asked for engineer visit this week; rep owes a visit date.",
-    draft: "Good morning Dr. Reddy, our engineer is free in the next two days to visit your Jeedimetla unit. Which day and time suits you? He will carry a spec sheet to confirm the line height for the carton sealer.",
+    draft: "Hello Dr. Reddy, following up on the engineer visit to your Jeedimetla unit to check the line height. Which day this week suits you? I will confirm the visit with our service team once you tell me.",
     messages: [
       r(-5, "10:00", "Good morning Dr. Reddy, thanks for visiting our stall. Sharing the auto carton sealing machine brochure."),
       b(-5, "14:30", "Received. We need to seal about 800 cartons per shift, carton size 300x200x150."),
@@ -115,7 +117,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Lakshmi Narayanan", company: "Sri Lakshmi Pickles", phone: "+91 90000 00007", source: "Referral",
     repEmail: "rep2@axon.demo", lastContactOffset: 0, tag: "Hot", followUpOffset: 0,
     reason: "Wants quote today with Chennai delivery before Pongal; leak-proof sealing is key.",
-    draft: "Vanakkam sir, quote for the paste filler pouch machine with triple seal is on its way, delivered to Chennai in 3 weeks, well before Pongal. Shall I call you at 4 pm today to walk through it?",
+    draft: "Vanakkam sir, quote for the paste filler pouch machine with triple seal is on its way. Shall I call you later today to walk through it and talk about delivery to Chennai before Pongal?",
     messages: [
       r(-2, "10:30", "Vanakkam sir, Suresh sir from Madurai suggested I contact you about pickle pouch packing."),
       b(-2, "12:10", "Yes, we need to pack 100g and 250g pickle in pouches. Oil leakage is the problem."),
@@ -149,7 +151,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Mohammed Irfan", company: "Irfan Textiles", phone: "+91 90000 00011", source: "Trade show",
     repEmail: "rep3@axon.demo", lastContactOffset: -3, tag: "Warm", followUpOffset: 0,
     reason: "Likes the L-bar plus tunnel combo; waiting for travelling director's approval.",
-    draft: "Irfan bhai, umeed hai director sahab ki trip achhi rahi. Jo L-bar tunnel combo ka quote bheja tha, uski delivery abhi 2 hafte mein ho jaati hai. Director sahab kab tak wapas aa rahe hain, taaki main usi hisaab se follow up karoon?",
+    draft: "Irfan bhai, umeed hai director sahab ki trip achhi rahi. Jo L-bar tunnel combo ka Rs 1.9 lakh wala quote bheja tha, uske baare mein koi sawaal ho to bata dein. Director sahab kab tak wapas aa rahe hain, taaki main usi hisaab se follow up karoon?",
     messages: [
       r(-8, "11:00", "Assalamualaikum Irfan bhai, shrink wrapping machine ki baat karni thi, trade show wali."),
       b(-8, "12:20", "Walaikum salaam. Haan, saree ke bundles wrap karne hain. Heat tunnel wali machine."),
@@ -161,7 +163,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Vivek Malhotra", company: "Malhotra FMCG Distributors", phone: "+91 90000 00012", source: "Trade show",
     repEmail: "rep3@axon.demo", lastContactOffset: -5, tag: "Warm", followUpOffset: -1,
     reason: "Comparing our Rs 79k strapping quote against a Rs 72k competitor; will revert.",
-    draft: "Vivek ji, price ke alawa ek baat: hamari 2 saal warranty aur Delhi NCR mein same-day service. Agar zarurat ho to main manager se Rs 7k ke gap par baat kar sakta hoon. Kya aapne quotes compare kar liye?",
+    draft: "Vivek ji, price ke alawa ek baat: hamari 2 saal warranty aur Delhi NCR mein local service. Agar zarurat ho to main manager se Rs 7k ke gap par baat kar sakta hoon. Kya aapne quotes compare kar liye?",
     messages: [
       r(-9, "11:30", "Hi Vivek ji, Pack Expo mein milke achha laga. Carton bundles ke liye strapping line dekh rahe hain?"),
       b(-9, "15:00", "Yes. Competitor ne fully-auto ke liye 72k bola hai."),
@@ -195,7 +197,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Harpreet Singh Bedi", company: "Bedi Logistics", phone: "+91 90000 00016", source: "Website",
     repEmail: "rep4@axon.demo", lastContactOffset: -9, tag: "Hot", followUpOffset: -8,
     reason: "Agreed Rs 64,500 each for two machines, said he would confirm next day; silent 9 days.",
-    draft: "Sat Sri Akal Bedi ji, aapne 2 strapping machines Rs 64,500 each pe final kiye the aur kal confirm karne wale the. Kya aap order confirm kar rahe hain? Bas haan ya na bata dein, to main dispatch plan kar loon.",
+    draft: "Sat Sri Akal Bedi ji, aapne 2 strapping machines Rs 64,500 each pe final kiye the aur confirm karne wale the. Kya aap order confirm kar rahe hain? Bas haan ya na bata dein, to main dispatch plan kar loon.",
     messages: [
       b(-12, "10:10", "Strapping machine chahiye, PP strap, semi-automatic. Rate bhejo."),
       r(-12, "10:40", "Sardar ji, semi-auto strapping Rs 68,000 + GST, 1 saal warranty. Stock mein hai."),
@@ -208,7 +210,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Anjali Deshmukh", company: "Deshmukh Dairy", phone: "+91 90000 00017", source: "Website",
     repEmail: "rep4@axon.demo", lastContactOffset: -18, tag: "Cold", followUpOffset: -4,
     reason: "No reply since the quote 24 days ago despite two follow-ups; likely lost interest.",
-    draft: "Hi Anjali, quote ke baad se aapki taraf se koi reply nahi aaya, to lagta hai abhi timing sahi nahi hai. Agar 1L bottle packs ki shrink wrapping abhi bhi plan mein hai, to main Rs 2.4 lakh ka rate hold kar sakti hoon. Kya plan abhi chal raha hai?",
+    draft: "Hi Anjali, quote ke baad se aapki taraf se koi reply nahi aaya, to lagta hai abhi timing sahi nahi hai. Agar 1L bottle packs ki shrink wrapping abhi bhi plan mein hai, to main Rs 2.4 lakh wale quote par baat ya demo arrange kar sakti hoon. Kya plan abhi chal raha hai?",
     messages: [
       b(-24, "11:00", "Looking for shrink wrap machine for 1L milk bottle packs of 6."),
       r(-24, "11:35", "Hi Anjali, tunnel shrink machine Rs 2.4 lakh. Quote attached."),
@@ -254,7 +256,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Imran Qureshi", company: "Qureshi Garments Exports", phone: "+91 90000 00022", source: "IndiaMART",
     repEmail: "rep5@axon.demo", lastContactOffset: -1, tag: "Hot", followUpOffset: 0,
     reason: "Needs carton sealer before his export shipment; asked for bank details to pay advance.",
-    draft: "Imran bhai, proforma invoice aur bank details bhej raha hoon, Rs 2.6 lakh + GST. Advance aate hi hum Tiruppur dispatch kar denge, shipment se pehle machine pahunch jayegi. Kya aap aaj advance bhej paayenge?",
+    draft: "Imran bhai, proforma invoice aur bank details bhej raha hoon, Rs 2.6 lakh + GST. Delivery 10 din ki hai aur aapki shipment 2 hafte mein hai. Kya aap aaj advance bhej paayenge?",
     messages: [
       b(-3, "10:20", "Carton sealing machine price? Export cartons, 5 ply."),
       r(-3, "10:50", "Imran bhai, auto carton sealer with side belts 5 ply handle karta hai. Rs 2.6 lakh + GST."),
@@ -279,7 +281,7 @@ export const SEED_LEADS: SeedLead[] = [
     name: "Divya Pillai", company: "Pillai Agro Exports", phone: "+91 90000 00024", source: "Referral",
     repEmail: "rep5@axon.demo", lastContactOffset: -3, tag: "Warm", followUpOffset: 2,
     reason: "Customer referral; intro call three days ago, interested in spice pouch sealing.",
-    draft: "Hello Divya ji, nice speaking with you a few days ago. I have put together two pouch sealing options for spice exports. May I send them to you today?",
+    draft: "Hello Divya ji, nice speaking with you a few days ago. I have put together pouch sealing options for spice exports. May I send them to you today?",
     messages: [],
   },
 ];

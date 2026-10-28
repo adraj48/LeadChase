@@ -22,6 +22,9 @@ export function daysOverdue(followUpDate: string, today: string): number {
 }
 
 // Asia/Kolkata calendar date (YYYY-MM-DD) of an ISO instant.
+// An unparseable timestamp falls back to the first 10 characters (or empty string), never throws.
 export function istDateOf(iso: string): string {
-  return todayIST(new Date(iso));
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return typeof iso === "string" ? iso.slice(0, 10) : "";
+  return todayIST(d);
 }

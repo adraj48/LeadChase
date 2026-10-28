@@ -1,11 +1,9 @@
-import type { Lead, Message, Rep, Role, Tag } from "@/lib/types";
+import type { Lead, Message, Rep, Tag } from "@/lib/types";
 import type { AgentResult } from "@/lib/agent";
 
 export interface RepRow {
   id: string;
   name: string;
-  email: string;
-  role: string;
 }
 
 export interface LeadRow {
@@ -21,8 +19,15 @@ export interface LeadRow {
   follow_up_date: string;
   draft: string;
   analysis_source: string;
+  analysis_status?: string;
+  analysis_started_at?: string | null;
   // PostgREST embeds a to-one relation as an object; tolerate an array too.
   reps?: { name: string } | { name: string }[] | null;
+}
+
+// GET lead reads the lead and its chat in one request (PostgREST embed).
+export interface LeadWithMessagesRow extends LeadRow {
+  messages?: MessageRow[] | null;
 }
 
 export interface MessageRow {
@@ -34,12 +39,12 @@ export interface MessageRow {
 }
 
 export function mapRep(r: RepRow): Rep {
-  return { id: r.id, name: r.name, email: r.email, role: r.role as Role };
+  return { id: r.id, name: r.name };
 }
 
 export function mapLead(r: LeadRow): Lead {
   const joined = Array.isArray(r.reps) ? r.reps[0] : r.reps;
-  return {
+  const lead: Lead = {
     id: r.id,
     repId: r.rep_id,
     repName: joined?.name ?? "",
@@ -54,6 +59,12 @@ export function mapLead(r: LeadRow): Lead {
     draft: r.draft,
     analysisSource: r.analysis_source as Lead["analysisSource"],
   };
+  // Only when the columns exist (database migrated); otherwise the lead is simply ready.
+  if (r.analysis_status !== undefined) {
+    lead.analysisStatus = r.analysis_status === "pending" ? "pending" : "ready";
+    lead.analysisStartedAt = r.analysis_started_at ?? null;
+  }
+  return lead;
 }
 
 export function mapMessage(r: MessageRow): Message {

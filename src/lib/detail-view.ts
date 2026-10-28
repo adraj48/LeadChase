@@ -65,3 +65,36 @@ export function headingText(state: "loading" | "error" | "loaded", name: string)
   if (state === "error") return "Couldn't load this lead";
   return name;
 }
+
+/**
+ * A background revalidation (or the first full load) brought a draft. Replace the
+ * box only when it is clean and the agent is not writing into it; otherwise keep the
+ * rep's text untouched (null = keep).
+ */
+export function revalidatedDraft(
+  box: { text: string; saved: string; agentBusy: boolean },
+  incoming: string,
+): { text: string; saved: string } | null {
+  if (box.agentBusy || box.text !== box.saved) return null;
+  if (box.text === incoming) return null;
+  return { text: incoming, saved: incoming };
+}
+
+/** Fields that make a list row look different; used to skip no-op list updates. */
+export function sameRow(
+  a: Pick<Lead, "tag" | "reason" | "followUpDate" | "draft" | "analysisStatus" | "analysisStartedAt" | "lastContactDate" | "name" | "company" | "phone">,
+  b: typeof a,
+): boolean {
+  return (
+    a.tag === b.tag &&
+    a.reason === b.reason &&
+    a.followUpDate === b.followUpDate &&
+    a.draft === b.draft &&
+    a.analysisStatus === b.analysisStatus &&
+    (a.analysisStartedAt ?? null) === (b.analysisStartedAt ?? null) &&
+    a.lastContactDate === b.lastContactDate &&
+    a.name === b.name &&
+    a.company === b.company &&
+    a.phone === b.phone
+  );
+}

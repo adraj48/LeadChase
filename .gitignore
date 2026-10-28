@@ -1,11 +1,4 @@
-node_modules/
-.env*
-!.env.example
-.superpowers/
-
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.*
@@ -15,31 +8,43 @@ node_modules/
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# Next.js build output
 /.next/
 /out/
-
-# production
 /build
 
-# misc
-.DS_Store
-*.pem
+# Testing
+/coverage
 
-# debug
+# Environment files (only the template is tracked)
+.env*
+!.env.example
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# OS and editor
+.DS_Store
+Thumbs.db
+*.pem
+.idea/
+.vscode/
 
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+# Local tooling and working notes
+.claude/
+.gstack/
+.superpowers/
+skills-lock.json
+HANDOFF.md
+docs/superpowers/

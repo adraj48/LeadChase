@@ -85,3 +85,41 @@ describe("updatedNote", () => {
     expect(updatedNote({ tag: "Warm", followUpDate: "2026-11-03" }, "2026-10-28")).toBe("Updated: Warm · follow-up 3 Nov 2026");
   });
 });
+
+import { revalidatedDraft, sameRow } from "@/lib/detail-view";
+
+describe("revalidatedDraft", () => {
+  it("replaces a clean box with the incoming draft", () => {
+    expect(revalidatedDraft({ text: "a", saved: "a", agentBusy: false }, "b")).toEqual({ text: "b", saved: "b" });
+  });
+  it("keeps unsaved edits", () => {
+    expect(revalidatedDraft({ text: "typed", saved: "a", agentBusy: false }, "b")).toBeNull();
+  });
+  it("never touches the box while the agent writes into it", () => {
+    expect(revalidatedDraft({ text: "a", saved: "a", agentBusy: true }, "b")).toBeNull();
+  });
+  it("is a no-op when nothing changed", () => {
+    expect(revalidatedDraft({ text: "a", saved: "a", agentBusy: false }, "a")).toBeNull();
+  });
+});
+
+describe("sameRow", () => {
+  const base = {
+    tag: "Hot" as const,
+    reason: "r",
+    followUpDate: "2026-10-29",
+    draft: "d",
+    analysisStatus: "ready" as const,
+    analysisStartedAt: null,
+    lastContactDate: "2026-10-28",
+    name: "n",
+    company: "c",
+    phone: "p",
+  };
+  it("detects equal and changed rows", () => {
+    expect(sameRow(base, { ...base })).toBe(true);
+    expect(sameRow(base, { ...base, analysisStartedAt: undefined as unknown as null })).toBe(true);
+    expect(sameRow(base, { ...base, tag: "Cold" })).toBe(false);
+    expect(sameRow(base, { ...base, draft: "x" })).toBe(false);
+  });
+});

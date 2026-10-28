@@ -240,14 +240,14 @@ export const SEED_LEADS: SeedLead[] = [
   // ---- rep5 ----
   {
     name: "Neha Gupta", company: "FreshBite Snacks", phone: "+91 98100 35792", source: "Cold call",
-    repEmail: "rep5@axon.demo", lastContactOffset: -12, tag: "Cold", followUpOffset: -3,
+    repEmail: "rep5@axon.demo", lastContactOffset: -3, tag: "Cold", followUpOffset: 11,
     reason: "Capex frozen; buyer explicitly said not this year, suggested checking in March.",
     draft: "Hi Neha, koi pressure nahi, mujhe pata hai is saal capex on hold hai. Main FreshBite ko March ke liye list mein rakhunga. Tab tak kya main ek one-page payback comparison bhej doon, hand packing versus pouch machine?",
     messages: [
-      r(-14, "11:00", "Hi Neha, Axon Packaging here. Are you looking at pouch packing automation for FreshBite?"),
-      b(-14, "11:45", "Hi. Currently we pack by hand and it works."),
-      r(-12, "10:30", "Understood. Our machine pays back in around 8 months at your volume. Can I send a quote?"),
-      b(-12, "12:15", "Honestly we have frozen all capex. Not this year, maybe check in March."),
+      r(-6, "11:00", "Hi Neha, Axon Packaging here. Are you looking at pouch packing automation for FreshBite?"),
+      b(-6, "11:45", "Hi. Currently we pack by hand and it works."),
+      r(-3, "10:30", "Understood. Our machine pays back in around 8 months at your volume. Can I send a quote?"),
+      b(-3, "12:15", "Honestly we have frozen all capex. Not this year, maybe check in March."),
     ],
   },
   {

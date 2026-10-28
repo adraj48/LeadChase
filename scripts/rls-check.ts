@@ -56,12 +56,33 @@ async function main() {
   assert(mine.every((l) => l.repId === me!.id), "every visible lead belongs to rep1");
   assert(mine.length < all.length, "sees fewer leads than the owner");
 
-  const other = all.find((l) => l.repId !== me!.id)!;
-  const before = await getLead(owner, other.id);
+  const chatPhones = new Set(SEED_LEADS.filter((l) => l.messages.length > 0).map((l) => l.phone));
+  const other = all.find((l) => l.repId !== me!.id && chatPhones.has(l.phone));
+  const own = mine.find((l) => chatPhones.has(l.phone));
+  if (!other || !own) {
+    console.error("Seed data missing a chat lead for rep1 or for another rep. Has the seed been run?");
+    process.exit(1);
+  }
+
+  // Positive controls: policies must not be over-strict.
+  const ownerView = await getLead(owner, other.id);
+  assert(ownerView !== null && ownerView.messages.length > 0, "owner sees another rep's lead with its messages");
+  const ownView = await getLead(rep1, own.id);
+  assert(ownView !== null && ownView.messages.length > 0, "rep1 sees own lead with its messages");
+
+  // Leads policy: another rep's lead is invisible and unchangeable.
   assert((await getLead(rep1, other.id)) === null, "getLead on another rep's lead returns null");
   assert((await saveDraft(rep1, other.id, "HACKED")) === false, "saveDraft on another rep's lead returns false");
   assert((await addMessage(rep1, other.id, "rep", "HACKED")) === null, "addMessage on another rep's lead returns null");
-  let insertBlocked = false;
+
+  // Messages policy, queried directly so the leads query cannot mask a broken policy.
+  const hidden = await rep1.from("messages").select("id").eq("lead_id", other.id);
+  assert(!hidden.error && (hidden.data?.length ?? -1) === 0, "rep1 reads 0 messages of another rep's lead");
+  const ownerMsgs = await owner.from("messages").select("id").eq("lead_id", other.id);
+  assert(!ownerMsgs.error && (ownerMsgs.data?.length ?? 0) > 0, "owner reads > 0 messages of that same lead");
+
+  // Insert policy: cannot create a lead for another rep, and the error must be an RLS violation.
+  let insertErr = "";
   try {
     await createLead(
       rep1,
@@ -69,20 +90,25 @@ async function main() {
       { name: "x", company: "x", phone: "+91 98000 00000", source: "Website", lastContactDate: todayIST() },
       { tag: "Cold", reason: "x", followUpDate: todayIST(), draft: "x", analysisSource: "fallback" },
     );
-  } catch {
-    insertBlocked = true;
+  } catch (e) {
+    insertErr = e instanceof Error ? e.message : String(e);
   }
-  assert(insertBlocked, "cannot create a lead owned by another rep");
+  assert(/row-level security|42501/i.test(insertErr), `createLead for another rep is blocked by RLS (got: ${insertErr || "no error"})`);
+
+  // Update WITH CHECK: cannot reassign own lead to another rep.
+  const reassign = await rep1.from("leads").update({ rep_id: other.repId }).eq("id", own.id).select("id");
+  assert(!!reassign.error || (reassign.data?.length ?? 0) === 0, "reassigning own lead to another rep is rejected");
+  const ownAfter = await getLead(owner, own.id);
+  assert(ownAfter !== null && ownAfter.lead.repId === me!.id, "own lead's rep_id unchanged after reassign attempt");
+
+  // Nothing changed on the other rep's lead.
   const after = await getLead(owner, other.id);
   assert(
-    before !== null && after !== null &&
-      before.lead.draft === after.lead.draft && before.messages.length === after.messages.length,
+    after !== null &&
+      ownerView.lead.draft === after.lead.draft &&
+      ownerView.messages.length === after.messages.length,
     "other rep's lead draft and messages unchanged",
   );
-
-  const own = mine[0];
-  const ownDetail = await getLead(rep1, own.id);
-  assert(ownDetail !== null, "getLead on own lead works");
 
   // Anonymous (no session) must not read anything.
   const anon = createClient(url, key, { auth: { persistSession: false } });

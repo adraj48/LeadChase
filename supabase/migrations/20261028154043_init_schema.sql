@@ -40,11 +40,17 @@ alter table public.reps enable row level security;
 alter table public.leads enable row level security;
 alter table public.messages enable row level security;
 
+-- Neutralise any default privileges the project auto-grants on new tables, then
+-- grant exactly what is needed.
 revoke all on public.reps, public.leads, public.messages from anon;
--- authenticated: read reps; read/insert/update leads and messages (no delete)
+revoke all on public.reps, public.leads, public.messages from authenticated;
+-- authenticated: read reps; read/insert/update leads; read/insert messages
+-- (no delete anywhere, messages are append-only, reps are read-only)
 grant select on public.reps to authenticated;
 grant select, insert, update on public.leads to authenticated;
 grant select, insert on public.messages to authenticated;
+-- service_role (seed script only; bypasses RLS) needs explicit table privileges
+grant select, insert, update, delete on public.reps, public.leads, public.messages to service_role;
 
 -- owner predicate: ((select auth.jwt()) -> 'app_metadata' ->> 'role') = 'owner'
 create policy reps_select on public.reps for select to authenticated

@@ -5,6 +5,7 @@ import type { Lead, Message } from "@/lib/types";
 import { followUpLabel } from "@/lib/lead-view";
 import {
   MAX_DRAFT,
+  headingText,
   analysisNote,
   canSave,
   canSend,
@@ -158,16 +159,18 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     flash(sentToast(body.lead.followUpDate, today));
   }
 
-  const heading = (text: string) => (
-    <h2 ref={headingRef} tabIndex={-1} className="break-words text-lg font-bold text-slate-900 focus:outline-none">
-      {text}
-    </h2>
-  );
+  const label = lead ? followUpLabel(lead.followUpDate, today) : null;
+  const note = lead ? analysisNote(lead.analysisSource) : null;
+  const over = text.length > MAX_DRAFT;
+  const dirty = text !== saved;
+  const state = loadError ? "error" : loading || !lead ? "loading" : "loaded";
 
-  if (loadError) {
-    return (
-      <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        {heading("Couldn't load this lead")}
+  return (
+    <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
+      <h2 ref={headingRef} tabIndex={-1} className="break-words text-lg font-bold text-slate-900 focus:outline-none">
+        {headingText(state, lead?.name ?? "")}
+      </h2>
+      {state === "error" && (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
           <span className="min-w-0 break-words">{loadError}</span>
           <button
@@ -178,30 +181,17 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
             Retry
           </button>
         </div>
-      </div>
-    );
-  }
-
-  if (loading || !lead) {
-    return (
-      <div aria-busy="true" aria-label="Loading lead" className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        {heading("Loading lead…")}
-        <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200" />
-        <div className="h-32 animate-pulse rounded bg-slate-200" />
-        <div className="h-24 animate-pulse rounded bg-slate-200" />
-      </div>
-    );
-  }
-
-  const label = followUpLabel(lead.followUpDate, today);
-  const note = analysisNote(lead.analysisSource);
-  const over = text.length > MAX_DRAFT;
-  const dirty = text !== saved;
-
-  return (
-    <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
-      <div className="min-w-0 space-y-1">
-        {heading(lead.name)}
+      )}
+      {state === "loading" && (
+        <div aria-busy="true" aria-label="Loading lead" className="space-y-3">
+          <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200" />
+          <div className="h-32 animate-pulse rounded bg-slate-200" />
+          <div className="h-24 animate-pulse rounded bg-slate-200" />
+        </div>
+      )}
+      {state === "loaded" && lead && label && (
+        <>
+          <div className="min-w-0 space-y-1">
         <p className="break-words text-sm text-slate-700">{lead.company}</p>
         <p className="text-sm text-slate-700">
           <a href={telHref(lead.phone)} className="text-blue-700 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
@@ -270,6 +260,8 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
           {status}
         </p>
       </div>
+        </>
+      )}
     </div>
   );
 }

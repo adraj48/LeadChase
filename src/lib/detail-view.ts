@@ -48,3 +48,9 @@ export function telHref(phone: string): string {
   const p = phone.replace(/\s+/g, "");
   return `tel:${p.startsWith("+") ? p : `+91${p}`}`;
 }
+
+export function headingText(state: "loading" | "error" | "loaded", name: string): string {
+  if (state === "loading") return "Loading lead…";
+  if (state === "error") return "Couldn't load this lead";
+  return name;
+}

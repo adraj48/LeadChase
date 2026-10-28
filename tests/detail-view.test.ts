@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatChatTime, formatDateLabel, canSend, canSave, sentToast, analysisNote, telHref } from "@/lib/detail-view";
+import { formatChatTime, formatDateLabel, canSend, canSave, sentToast, analysisNote, telHref, headingText } from "@/lib/detail-view";
 
 describe("formatChatTime", () => {
   it("formats afternoon IST", () => {
@@ -56,4 +56,12 @@ describe("telHref", () => {
   });
   it("defaults to +91", () => expect(telHref("98265 41872")).toBe("tel:+919826541872"));
   it("strips extra whitespace", () => expect(telHref("  98265 \t 41872 ")).toBe("tel:+919826541872"));
+});
+
+describe("headingText", () => {
+  it("maps each state to heading text", () => {
+    expect(headingText("loading", "")).toBe("Loading lead…");
+    expect(headingText("error", "")).toBe("Couldn't load this lead");
+    expect(headingText("loaded", "Ravi Kumar")).toBe("Ravi Kumar");
+  });
 });

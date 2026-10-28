@@ -79,6 +79,9 @@ export function Dashboard({ me }: { me: Me }) {
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const headlineRef = useRef<HTMLParagraphElement>(null);
+  const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const lastSelectedRef = useRef<string | null>(null);
 
   // reload() refetches the list; Task 8/9 call it after sending a message or adding a lead.
   const reload = useCallback(async () => {
@@ -123,6 +126,20 @@ export function Dashboard({ me }: { me: Me }) {
       .catch(() => setReps([]));
   }, [isOwner]);
 
+  // Focus management: below lg the list is hidden while a lead is open, so move focus
+  // into the detail pane on select and back to the row (or headline) on Back.
+  useEffect(() => {
+    if (selectedId) {
+      lastSelectedRef.current = selectedId;
+      if (!window.matchMedia("(min-width: 1024px)").matches) detailHeadingRef.current?.focus();
+    } else if (lastSelectedRef.current) {
+      const id = lastSelectedRef.current;
+      lastSelectedRef.current = null;
+      const row = document.querySelector<HTMLElement>(`[data-lead-id="${CSS.escape(id)}"]`);
+      (row ?? headlineRef.current)?.focus();
+    }
+  }, [selectedId]);
+
   const groups = useMemo(() => groupLeads(leads, today), [leads, today]);
   const counts = useMemo(() => tagCounts(leads), [leads]);
   const selected = leads.find((l) => l.id === selectedId) ?? null;
@@ -132,7 +149,7 @@ export function Dashboard({ me }: { me: Me }) {
     <div className="min-h-screen bg-slate-50">
       <Header me={me} reps={reps} repFilter={repFilter} onRepFilter={setRepFilter} counts={counts} />
       <main className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[2fr_3fr]">
-        <div className={selected ? "hidden lg:block" : ""}>
+        <div className={`min-w-0 ${selected ? "hidden lg:block" : ""}`}>
           {error ? (
             <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
               <span>{error}</span>
@@ -148,7 +165,7 @@ export function Dashboard({ me }: { me: Me }) {
             <Skeleton />
           ) : (
             <div className="space-y-5">
-              <p aria-live="polite" className="text-xl font-bold text-slate-900">
+              <p ref={headlineRef} tabIndex={-1} aria-live="polite" className="text-xl font-bold text-slate-900 focus:outline-none">
                 {summaryLine(groups)}
               </p>
               <Section title="Overdue" leads={groups.overdue} empty="Nothing here 🎉" {...sectionProps} />
@@ -157,7 +174,7 @@ export function Dashboard({ me }: { me: Me }) {
             </div>
           )}
         </div>
-        <div className={selected ? "" : "hidden lg:block"}>
+        <div className={`min-w-0 ${selected ? "" : "hidden lg:block"}`}>
           {selected ? (
             // replaced in Task 8
             <div className="rounded-lg bg-white p-4 shadow-sm">
@@ -168,7 +185,7 @@ export function Dashboard({ me }: { me: Me }) {
               >
                 ← Back
               </button>
-              <h2 className="text-lg font-bold text-slate-900">{selected.name}</h2>
+              <h2 ref={detailHeadingRef} tabIndex={-1} className="text-lg font-bold text-slate-900 focus:outline-none">{selected.name}</h2>
             </div>
           ) : (
             <DetailPlaceholder />

@@ -65,3 +65,23 @@ describe("headingText", () => {
     expect(headingText("loaded", "Ravi Kumar")).toBe("Ravi Kumar");
   });
 });
+
+import { canAddMessage, updatedNote } from "@/lib/detail-view";
+
+describe("canAddMessage", () => {
+  it("rules", () => {
+    expect(canAddMessage("hi", false)).toBe(true);
+    expect(canAddMessage("hi", true)).toBe(false);
+    expect(canAddMessage("  \n ", false)).toBe(false);
+    expect(canAddMessage("a".repeat(1000), false)).toBe(true);
+    expect(canAddMessage("a".repeat(1001), false)).toBe(false);
+  });
+});
+
+describe("updatedNote", () => {
+  it("uses today / tomorrow / date wording", () => {
+    expect(updatedNote({ tag: "Hot", followUpDate: "2026-10-28" }, "2026-10-28")).toBe("Updated: Hot · follow-up today");
+    expect(updatedNote({ tag: "Hot", followUpDate: "2026-10-29" }, "2026-10-28")).toBe("Updated: Hot · follow-up tomorrow");
+    expect(updatedNote({ tag: "Warm", followUpDate: "2026-11-03" }, "2026-10-28")).toBe("Updated: Warm · follow-up 3 Nov 2026");
+  });
+});

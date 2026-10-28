@@ -11,9 +11,11 @@ interface Props {
   repFilter: string;
   onRepFilter: (repId: string) => void;
   counts: Record<Tag, number>;
+  onAddLead?: () => void;
+  addDisabled?: boolean;
 }
 
-export function Header({ me, reps, repFilter, onRepFilter, counts }: Props) {
+export function Header({ me, reps, repFilter, onRepFilter, counts, onAddLead, addDisabled }: Props) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const isOwner = me.role === "owner";
@@ -41,6 +43,16 @@ export function Header({ me, reps, repFilter, onRepFilter, counts }: Props) {
           </div>
         )}
         <div className="ml-auto flex flex-wrap items-center gap-3">
+          {onAddLead && (
+            <button
+              type="button"
+              onClick={onAddLead}
+              disabled={addDisabled}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              + Add lead
+            </button>
+          )}
           {isOwner && (
             <label className="flex items-center gap-2 text-sm text-slate-700">
               Rep

@@ -9,10 +9,13 @@ import {
   analysisNote,
   canSave,
   canSend,
+  canAddMessage,
+  updatedNote,
   formatDateLabel,
   sentToast,
   telHref,
 } from "@/lib/detail-view";
+import { validateMessage } from "@/lib/validate";
 import { TagChip } from "./TagChip";
 import { ChatThread } from "./ChatThread";
 
@@ -42,6 +45,10 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
   const [actionError, setActionError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const [msgFrom, setMsgFrom] = useState<"buyer" | "rep">("buyer");
+  const [msgText, setMsgText] = useState("");
+  const [highlight, setHighlight] = useState(false);
+  const hlTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onGoneRef = useRef(onGone);
@@ -59,6 +66,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     return () => {
       mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (hlTimerRef.current) clearTimeout(hlTimerRef.current);
     };
   }, []);
 
@@ -103,14 +111,14 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     return () => ctrl.abort();
   }, [leadId, attempt]);
 
-  async function request(path: string, method: string) {
+  async function request(path: string, method: string, payload: unknown = { draft: text }) {
     setBusy(true);
     setActionError(null);
     try {
       const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/${path}`, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draft: text }),
+        body: JSON.stringify(payload),
       });
       if (res.status === 401) {
         window.location.assign("/login");
@@ -159,6 +167,34 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     flash(sentToast(body.lead.followUpDate, today));
   }
 
+  async function addMessage() {
+    if (!canAddMessage(msgText, busy)) return;
+    if (dirty && !window.confirm("Adding this message will replace your unsaved draft edits with a new suggestion. Continue?")) return;
+    const v = validateMessage({ from: msgFrom, text: msgText });
+    if (!v.ok) {
+      setActionError(v.error);
+      return;
+    }
+    const body = await request("messages", "POST", v.value);
+    if (!body) return;
+    // Server state changed: always refresh the list, even if this pane is gone.
+    onChanged();
+    if (!mountedRef.current) return;
+    if (!body.lead || !Array.isArray(body.messages)) {
+      setActionError("Unexpected response from server");
+      return;
+    }
+    setLead(body.lead);
+    setMessages(body.messages);
+    setMsgText("");
+    setText(body.lead.draft ?? "");
+    setSaved(body.lead.draft ?? "");
+    flash(updatedNote(body.lead, today));
+    if (hlTimerRef.current) clearTimeout(hlTimerRef.current);
+    setHighlight(true);
+    hlTimerRef.current = setTimeout(() => setHighlight(false), 2000);
+  }
+
   const label = lead ? followUpLabel(lead.followUpDate, today) : null;
   const note = lead ? analysisNote(lead.analysisSource) : null;
   const over = text.length > MAX_DRAFT;
@@ -203,7 +239,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
         {isOwner && <p className="text-sm text-slate-500">Rep: {lead.repName}</p>}
       </div>
 
-      <div className="min-w-0 space-y-1">
+      <div className={`min-w-0 space-y-1 rounded-md transition-shadow duration-700 ${highlight ? "bg-amber-50 ring-2 ring-amber-400" : "ring-0 ring-transparent"}`}>
         <div className="flex flex-wrap items-center gap-2">
           <TagChip tag={lead.tag} />
           <span className={`text-sm ${LABEL_STYLE[label.tone]}`}>{label.text}</span>
@@ -215,7 +251,46 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
 
       <ChatThread messages={messages} />
 
-      <div className="space-y-2">
+      <fieldset className="space-y-2" disabled={busy}>
+        <legend className="text-sm font-medium text-slate-800">Add to chat</legend>
+        <div role="radiogroup" aria-label="Who said it" className="inline-flex overflow-hidden rounded-md border border-slate-300">
+          {([["buyer", "Buyer said"], ["rep", "I said"]] as const).map(([val, lbl]) => (
+            <label
+              key={val}
+              className={`cursor-pointer px-3 py-1.5 text-sm has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-600 ${msgFrom === val ? "bg-blue-600 text-white" : "bg-white text-slate-800 hover:bg-slate-50"}`}
+            >
+              <input type="radio" name="msg-from" value={val} checked={msgFrom === val} onChange={() => setMsgFrom(val)} className="sr-only" />
+              {lbl}
+            </label>
+          ))}
+        </div>
+        <label htmlFor="new-message" className="block text-sm text-slate-700">
+          Paste or type a message
+        </label>
+        <textarea
+          id="new-message"
+          rows={3}
+          value={msgText}
+          readOnly={busy}
+          onChange={(e) => setMsgText(e.target.value)}
+          className="block w-full rounded-md border border-slate-300 p-2 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+        />
+        <div className="flex items-center justify-between gap-2">
+          <span className={`text-xs ${msgText.length > MAX_DRAFT ? "font-semibold text-red-600" : "text-slate-500"}`}>
+            {msgText.length}/{MAX_DRAFT}
+          </span>
+          <button
+            type="button"
+            onClick={addMessage}
+            disabled={!canAddMessage(msgText, busy)}
+            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Add to chat
+          </button>
+        </div>
+      </fieldset>
+
+      <div className={`space-y-2 rounded-md transition-shadow duration-700 ${highlight ? "bg-amber-50 ring-2 ring-amber-400" : "ring-0 ring-transparent"}`}>
         <label htmlFor="draft-message" className="block text-sm font-medium text-slate-800">
           Draft message
         </label>

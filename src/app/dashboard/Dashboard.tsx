@@ -6,6 +6,7 @@ import type { Lead, Rep } from "@/lib/types";
 import { groupLeads, summaryLine, tagCounts } from "@/lib/lead-view";
 import { Header } from "@/components/Header";
 import { LeadRow } from "@/components/LeadRow";
+import { AddLeadDialog } from "@/components/AddLeadDialog";
 import { LeadDetail } from "@/components/LeadDetail";
 
 type Me = Pick<Rep, "name" | "role">;
@@ -79,6 +80,7 @@ export function Dashboard({ me }: { me: Me }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const headlineRef = useRef<HTMLParagraphElement>(null);
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -141,6 +143,18 @@ export function Dashboard({ me }: { me: Me }) {
     }
   }, [selectedId]);
 
+  const closeAdd = useCallback(() => setAddOpen(false), []);
+  // After a lead is created: make sure the owner's rep filter does not hide it, then refetch.
+  // If the filter changes, reload is recreated and the effect refetches; otherwise refetch directly.
+  const handleCreated = useCallback(
+    (lead: Lead) => {
+      setSelectedId(lead.id);
+      if (repFilter && repFilter !== lead.repId) setRepFilter("");
+      else reload();
+    },
+    [repFilter, reload],
+  );
+
   const groups = useMemo(() => groupLeads(leads, today), [leads, today]);
   const counts = useMemo(() => tagCounts(leads), [leads]);
   const selected = leads.find((l) => l.id === selectedId) ?? null;
@@ -148,7 +162,14 @@ export function Dashboard({ me }: { me: Me }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <Header me={me} reps={reps} repFilter={repFilter} onRepFilter={setRepFilter} counts={counts} />
+      <Header
+        me={me}
+        reps={reps}
+        repFilter={repFilter} onRepFilter={setRepFilter} counts={counts}
+        onAddLead={() => setAddOpen(true)}
+        addDisabled={!today}
+      />
+      <AddLeadDialog open={addOpen} onClose={closeAdd} onCreated={handleCreated} today={today} isOwner={isOwner} reps={reps} me={me} />
       <main className="mx-auto grid max-w-7xl gap-4 px-4 py-4 lg:grid-cols-[2fr_3fr]">
         <div className={`min-w-0 ${selected ? "hidden lg:block" : ""}`}>
           {error ? (

@@ -34,10 +34,21 @@ export function canSave(draft: string, saved: string, busy: boolean): boolean {
   return canSend(draft, busy) && draft !== saved;
 }
 
-export function sentToast(followUpDate: string, today: string): string {
+function whenWord(followUpDate: string, today: string): string {
   const ahead = diffDays(followUpDate, today);
-  const when = ahead === 0 ? "today" : ahead === 1 ? "tomorrow" : formatDateLabel(followUpDate);
-  return `Sent. Next follow-up: ${when}`;
+  return ahead === 0 ? "today" : ahead === 1 ? "tomorrow" : formatDateLabel(followUpDate);
+}
+
+export function sentToast(followUpDate: string, today: string): string {
+  return `Sent. Next follow-up: ${whenWord(followUpDate, today)}`;
+}
+
+export function canAddMessage(text: string, busy: boolean): boolean {
+  return !busy && text.trim().length > 0 && text.length <= MAX_DRAFT;
+}
+
+export function updatedNote(lead: Pick<Lead, "tag" | "followUpDate">, today: string): string {
+  return `Updated: ${lead.tag} · follow-up ${whenWord(lead.followUpDate, today)}`;
 }
 
 export function analysisNote(source: Lead["analysisSource"]): string | null {

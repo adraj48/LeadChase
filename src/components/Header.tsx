@@ -62,7 +62,7 @@ export function Header({ me, reps, repFilter, onRepFilter, counts, onAddLead, ad
                 className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
               >
                 <option value="">All reps</option>
-                {reps.map((r) => (
+                {reps.filter((r) => r.role === "rep").map((r) => (
                   <option key={r.id} value={r.id}>
                     {r.name}
                   </option>

@@ -16,6 +16,7 @@ import {
   telHref,
 } from "@/lib/detail-view";
 import { validateMessage } from "@/lib/validate";
+import { signOutAndGoToLogin } from "@/lib/client-auth";
 import { TagChip } from "./TagChip";
 import { ChatThread } from "./ChatThread";
 
@@ -42,6 +43,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
   const [text, setText] = useState("");
   const [saved, setSaved] = useState("");
   const [busy, setBusy] = useState(false);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -82,7 +84,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
       try {
         const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}`, { signal: ctrl.signal });
         if (res.status === 401) {
-          window.location.assign("/login");
+          await signOutAndGoToLogin();
           return;
         }
         if (res.status === 404) {
@@ -113,6 +115,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
 
   async function request(path: string, method: string, payload: unknown = { draft: text }) {
     setBusy(true);
+    setBusyPath(path);
     setActionError(null);
     try {
       const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}/${path}`, {
@@ -121,7 +124,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
         body: JSON.stringify(payload),
       });
       if (res.status === 401) {
-        window.location.assign("/login");
+        await signOutAndGoToLogin();
         return null;
       }
       if (res.status === 404) {
@@ -138,7 +141,10 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
       if (mountedRef.current) setActionError(e instanceof Error ? e.message : "Network error");
       return null;
     } finally {
-      if (mountedRef.current) setBusy(false);
+      if (mountedRef.current) {
+        setBusy(false);
+        setBusyPath(null);
+      }
     }
   }
 
@@ -193,6 +199,11 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     if (hlTimerRef.current) clearTimeout(hlTimerRef.current);
     setHighlight(true);
     hlTimerRef.current = setTimeout(() => setHighlight(false), 2000);
+    // Return focus to the message box once the fieldset is re-enabled (a textarea
+    // inside a disabled fieldset cannot take focus until the next commit).
+    requestAnimationFrame(() => {
+      if (mountedRef.current) document.getElementById("new-message")?.focus();
+    });
   }
 
   const label = lead ? followUpLabel(lead.followUpDate, today) : null;
@@ -285,7 +296,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
             disabled={!canAddMessage(msgText, busy)}
             className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Add to chat
+            {busy && busyPath === "messages" ? "Analysing…" : "Add to chat"}
           </button>
         </div>
       </fieldset>
@@ -328,7 +339,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
             disabled={!canSend(text, busy)}
             className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Mark as sent
+            {busy && busyPath === "sent" ? "Sending…" : "Mark as sent"}
           </button>
         </div>
         <p role="status" aria-live="polite" className="min-h-5 text-sm text-emerald-700">

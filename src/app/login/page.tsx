@@ -4,6 +4,8 @@ import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabase } from "@/lib/supabase/client";
 
+const UNREACHABLE = "Can't reach the server. Try again in a minute.";
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -15,17 +17,25 @@ export default function LoginPage() {
     e.preventDefault();
     setPending(true);
     setError(null);
-    const { error: err } = await createBrowserSupabase().auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (err) {
-      setError("Invalid email or password");
+    try {
+      const { error: err } = await createBrowserSupabase().auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (err) {
+        const status = err.status;
+        const isCredentials =
+          err.code === "invalid_credentials" || status === 400 || status === 401;
+        setError(isCredentials ? "Invalid email or password" : UNREACHABLE);
+        return;
+      }
+      router.replace("/dashboard");
+      router.refresh();
+    } catch {
+      setError(UNREACHABLE);
+    } finally {
       setPending(false);
-      return;
     }
-    router.replace("/dashboard");
-    router.refresh();
   }
 
   return (

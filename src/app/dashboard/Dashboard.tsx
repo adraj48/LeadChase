@@ -1,13 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import type { Lead, Rep } from "@/lib/types";
 import { groupLeads, summaryLine, tagCounts } from "@/lib/lead-view";
 import { Header } from "@/components/Header";
 import { LeadRow } from "@/components/LeadRow";
 import { AddLeadDialog } from "@/components/AddLeadDialog";
 import { LeadDetail } from "@/components/LeadDetail";
+import { signOutAndGoToLogin } from "@/lib/client-auth";
 
 type Me = Pick<Rep, "name" | "role">;
 
@@ -71,7 +71,6 @@ function DetailPlaceholder() {
 }
 
 export function Dashboard({ me }: { me: Me }) {
-  const router = useRouter();
   const isOwner = me.role === "owner";
   const [leads, setLeads] = useState<Lead[]>([]);
   const [today, setToday] = useState("");
@@ -86,7 +85,7 @@ export function Dashboard({ me }: { me: Me }) {
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
   const lastSelectedRef = useRef<string | null>(null);
 
-  // reload() refetches the list; Task 8/9 call it after sending a message or adding a lead.
+  // reload() refetches the list; called after sending a message or adding a lead.
   const reload = useCallback(async () => {
     abortRef.current?.abort();
     const ctrl = new AbortController();
@@ -97,13 +96,17 @@ export function Dashboard({ me }: { me: Me }) {
       const qs = repFilter ? `?rep=${encodeURIComponent(repFilter)}` : "";
       const res = await fetch(`/api/leads${qs}`, { signal: ctrl.signal });
       if (res.status === 401) {
-        router.replace("/login");
+        await signOutAndGoToLogin();
         return;
       }
       const body = await res.json().catch(() => ({}));
       if (ctrl.signal.aborted) return;
       if (!res.ok) {
         setError(body.error ?? "Something went wrong");
+        return;
+      }
+      if (!Array.isArray(body.leads) || typeof body.today !== "string") {
+        setError("Unexpected response from the server");
         return;
       }
       setLeads(body.leads);
@@ -114,7 +117,7 @@ export function Dashboard({ me }: { me: Me }) {
     } finally {
       if (abortRef.current === ctrl) setLoading(false);
     }
-  }, [repFilter, router]);
+  }, [repFilter]);
 
   useEffect(() => {
     reload();

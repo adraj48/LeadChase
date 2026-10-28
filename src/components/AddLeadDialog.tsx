@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Lead, Rep } from "@/lib/types";
 import { SOURCES, validateNewLead } from "@/lib/validate";
+import { signOutAndGoToLogin } from "@/lib/client-auth";
 
 interface Props {
   open: boolean;
@@ -91,7 +92,7 @@ export function AddLeadDialog({ open, onClose, onCreated, today, isOwner, reps, 
         body: JSON.stringify(payload),
       });
       if (res.status === 401) {
-        window.location.assign("/login");
+        await signOutAndGoToLogin();
         return;
       }
       const body = await res.json().catch(() => ({}));

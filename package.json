@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run --passWithNoTests",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "rls-check": "tsx scripts/rls-check.ts"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.7",

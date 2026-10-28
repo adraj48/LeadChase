@@ -43,3 +43,8 @@ export function sentToast(followUpDate: string, today: string): string {
 export function analysisNote(source: Lead["analysisSource"]): string | null {
   return source === "fallback" ? "AI unavailable — rule-based suggestion" : null;
 }
+
+export function telHref(phone: string): string {
+  const p = phone.replace(/\s+/g, "");
+  return `tel:${p.startsWith("+") ? p : `+91${p}`}`;
+}

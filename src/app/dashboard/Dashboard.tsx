@@ -186,6 +186,7 @@ export function Dashboard({ me }: { me: Me }) {
                 ← Back
               </button>
               <LeadDetail
+                key={selected.id}
                 leadId={selected.id}
                 headingRef={detailHeadingRef}
                 today={today}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatChatTime, formatDateLabel, canSend, canSave, sentToast, analysisNote } from "@/lib/detail-view";
+import { formatChatTime, formatDateLabel, canSend, canSave, sentToast, analysisNote, telHref } from "@/lib/detail-view";
 
 describe("formatChatTime", () => {
   it("formats afternoon IST", () => {
@@ -47,4 +47,13 @@ describe("analysisNote", () => {
     expect(analysisNote("llm")).toBeNull();
     expect(analysisNote("seed")).toBeNull();
   });
+});
+
+describe("telHref", () => {
+  it("keeps an existing country code", () => {
+    expect(telHref("+91 98265 41872")).toBe("tel:+919826541872");
+    expect(telHref("+44 20 7946 0958")).toBe("tel:+442079460958");
+  });
+  it("defaults to +91", () => expect(telHref("98265 41872")).toBe("tel:+919826541872"));
+  it("strips extra whitespace", () => expect(telHref("  98265 \t 41872 ")).toBe("tel:+919826541872"));
 });

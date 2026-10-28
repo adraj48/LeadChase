@@ -10,6 +10,7 @@ import {
   canSend,
   formatDateLabel,
   sentToast,
+  telHref,
 } from "@/lib/detail-view";
 import { TagChip } from "./TagChip";
 import { ChatThread } from "./ChatThread";
@@ -40,18 +41,24 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
   const [actionError, setActionError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
+  const mountedRef = useRef(true);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onGoneRef = useRef(onGone);
   onGoneRef.current = onGone;
 
   const flash = useCallback((msg: string) => {
+    if (!mountedRef.current) return;
     if (timerRef.current) clearTimeout(timerRef.current);
     setStatus(msg);
     timerRef.current = setTimeout(() => setStatus(null), 4000);
   }, []);
 
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -62,7 +69,6 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     setMessages([]);
     setActionError(null);
     setStatus(null);
-    setBusy(false);
     (async () => {
       try {
         const res = await fetch(`/api/leads/${encodeURIComponent(leadId)}`, { signal: ctrl.signal });
@@ -109,24 +115,28 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
         window.location.assign("/login");
         return null;
       }
+      if (res.status === 404) {
+        if (mountedRef.current) onGoneRef.current();
+        return null;
+      }
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setActionError(body.error ?? "Something went wrong");
+        if (mountedRef.current) setActionError(body.error ?? "Something went wrong");
         return null;
       }
       return body;
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : "Network error");
+      if (mountedRef.current) setActionError(e instanceof Error ? e.message : "Network error");
       return null;
     } finally {
-      setBusy(false);
+      if (mountedRef.current) setBusy(false);
     }
   }
 
   async function save() {
     const sentText = text;
     const body = await request("draft", "PUT");
-    if (!body) return;
+    if (!body || !mountedRef.current) return;
     setSaved(sentText);
     flash("Draft saved");
   }
@@ -134,6 +144,9 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
   async function send() {
     const body = await request("sent", "POST");
     if (!body) return;
+    // Server state changed: always refresh the list, even if this pane is gone.
+    onChanged();
+    if (!mountedRef.current) return;
     if (!body.lead || !Array.isArray(body.messages)) {
       setActionError("Unexpected response from server");
       return;
@@ -143,20 +156,28 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
     setText(body.lead.draft ?? "");
     setSaved(body.lead.draft ?? "");
     flash(sentToast(body.lead.followUpDate, today));
-    onChanged();
   }
+
+  const heading = (text: string) => (
+    <h2 ref={headingRef} tabIndex={-1} className="break-words text-lg font-bold text-slate-900 focus:outline-none">
+      {text}
+    </h2>
+  );
 
   if (loadError) {
     return (
-      <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
-        <span className="min-w-0 break-words">{loadError}</span>
-        <button
-          type="button"
-          onClick={() => setAttempt((n) => n + 1)}
-          className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
-        >
-          Retry
-        </button>
+      <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+        {heading("Couldn't load this lead")}
+        <div role="alert" className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">
+          <span className="min-w-0 break-words">{loadError}</span>
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -164,8 +185,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
   if (loading || !lead) {
     return (
       <div aria-busy="true" aria-label="Loading lead" className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 ref={headingRef} tabIndex={-1} className="sr-only focus:outline-none">Loading lead</h2>
-        <div className="h-6 w-1/2 animate-pulse rounded bg-slate-200" />
+        {heading("Loading lead…")}
         <div className="h-4 w-1/3 animate-pulse rounded bg-slate-200" />
         <div className="h-32 animate-pulse rounded bg-slate-200" />
         <div className="h-24 animate-pulse rounded bg-slate-200" />
@@ -180,13 +200,11 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
 
   return (
     <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4">
-      <div className="min-w-0">
-        <h2 ref={headingRef} tabIndex={-1} className="break-words text-lg font-bold text-slate-900 focus:outline-none">
-          {lead.name}
-        </h2>
+      <div className="min-w-0 space-y-1">
+        {heading(lead.name)}
         <p className="break-words text-sm text-slate-700">{lead.company}</p>
         <p className="text-sm text-slate-700">
-          <a href={`tel:+91${lead.phone.replace(/\s+/g, "")}`} className="text-blue-700 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
+          <a href={telHref(lead.phone)} className="text-blue-700 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600">
             {lead.phone}
           </a>
           <span className="text-slate-500"> · {lead.source}</span>
@@ -215,6 +233,7 @@ export function LeadDetail({ leadId, headingRef, today, isOwner, onChanged, onGo
           id="draft-message"
           rows={6}
           value={text}
+          readOnly={busy}
           onChange={(e) => setText(e.target.value)}
           className="block w-full rounded-md border border-slate-300 p-2 text-sm text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
         />

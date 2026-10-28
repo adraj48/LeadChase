@@ -14,6 +14,7 @@ vi.mock("@/lib/repo", () => ({
 }));
 
 import * as repo from "@/lib/repo";
+import { resetGeminiBreaker } from "@/lib/gemini-breaker";
 import { POST } from "@/app/api/leads/[id]/draft-suggestion/route";
 import * as route from "@/app/api/leads/[id]/draft-suggestion/route";
 
@@ -66,6 +67,7 @@ const noWrites = () => {
 
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  resetGeminiBreaker();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
   vi.stubEnv("GEMINI_API_KEY", "test-secret-key");
@@ -230,6 +232,14 @@ describe("fallback", () => {
     expect(r.status).toBe(200);
     expect(r.headers.get("X-Draft-Source")).toBe("fallback");
     expect((await r.text()).length).toBeGreaterThan(10);
+  });
+  it("after a 429 the next draft skips Gemini and still reports fallback", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 429 }));
+    expect((await POST(post(), ctx())).headers.get("X-Draft-Source")).toBe("fallback");
+    fetchMock.mockClear();
+    const r = await POST(post(), ctx());
+    expect(r.headers.get("X-Draft-Source")).toBe("fallback");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
   it("Gemini network failure, empty or blocked output: falls back", async () => {
     fetchMock.mockRejectedValueOnce(new TypeError("fetch failed"));

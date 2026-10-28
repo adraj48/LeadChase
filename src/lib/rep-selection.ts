@@ -16,6 +16,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 
+/** True for ALL_REPS or a uuid: the only values a view can take. */
+export function isViewing(v: unknown): v is Viewing {
+  return v === ALL_REPS || (typeof v === "string" && UUID_RE.test(v));
+}
+
 /** A syntactically valid stored choice, or null. */
 export function readViewing(storage: StorageLike | null | undefined): Viewing | null {
   try {
@@ -43,9 +48,19 @@ export function writeViewing(storage: StorageLike | null | undefined, v: Viewing
 export function resolveViewing(reps: RepOption[], stored: Viewing | null): Viewing {
   if (stored === ALL_REPS) return ALL_REPS;
   if (stored && reps.some((r) => r.id === stored)) return stored;
-  const preferred = reps.find((r) => r.name.trim().toLowerCase() === DEFAULT_REP_NAME.toLowerCase());
-  return preferred?.id ?? reps[0]?.id ?? ALL_REPS;
+  return pickDefaultRepId(reps);
 }
+
+/** The default rep's id (by name, else the first rep by name), or ALL_REPS when none. Server and client share it. */
+export function pickDefaultRepId(reps: RepOption[]): string {
+  const preferred = reps.find((r) => r.name.trim().toLowerCase() === DEFAULT_REP_NAME.toLowerCase());
+  if (preferred) return preferred.id;
+  const first = [...reps].sort((a, b) => a.name.localeCompare(b.name))[0];
+  return first?.id ?? ALL_REPS;
+}
+
+/** The leads URL for a first-time visitor: the server resolves the default rep itself. */
+export const DEFAULT_LEADS_URL = "/api/leads?rep=default";
 
 export function leadsUrl(v: Viewing): string {
   return `/api/leads?rep=${encodeURIComponent(v)}`;

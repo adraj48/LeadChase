@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   ALL_REPS,
+  DEFAULT_LEADS_URL,
   VIEWING_KEY,
+  isViewing,
+  pickDefaultRepId,
   leadsUrl,
   parseReps,
   readViewing,
@@ -90,5 +93,29 @@ describe("helpers", () => {
     expect(realtimeFilter(SNEHA)).toBe(`rep_id=eq.${SNEHA}`);
     expect(realtimeFilter(ALL_REPS)).toBeUndefined();
     expect(realtimeFilter(null)).toBeUndefined();
+  });
+});
+
+describe("pickDefaultRepId / default list", () => {
+  it("prefers Sneha Iyer case-insensitively", () => {
+    expect(pickDefaultRepId(reps)).toBe(SNEHA);
+    expect(pickDefaultRepId([{ id: ARJUN, name: "a" }, { id: SNEHA, name: " SNEHA iyer " }])).toBe(SNEHA);
+  });
+  it("without a Sneha it is the first rep by name, and 'all' with no reps", () => {
+    expect(pickDefaultRepId([{ id: SNEHA, name: "Zed" }, { id: ARJUN, name: "Arjun" }])).toBe(ARJUN);
+    expect(pickDefaultRepId([])).toBe(ALL_REPS);
+  });
+  it("agrees with resolveViewing when nothing is stored", () => {
+    expect(resolveViewing(reps, null)).toBe(pickDefaultRepId(reps));
+    expect(resolveViewing([], null)).toBe(pickDefaultRepId([]));
+  });
+  it("isViewing accepts all or a uuid only", () => {
+    expect(isViewing("all")).toBe(true);
+    expect(isViewing(SNEHA)).toBe(true);
+    expect(isViewing("default")).toBe(false);
+    expect(isViewing(5)).toBe(false);
+  });
+  it("the default list url", () => {
+    expect(DEFAULT_LEADS_URL).toBe("/api/leads?rep=default");
   });
 });

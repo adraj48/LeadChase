@@ -12,6 +12,7 @@ import { leadToRow, mapLead, mapMessage, mapRep, type LeadWithMessagesRow, type 
 // analysis columns exist:
 //   GET  /api/reps                      1  listReps
 //   GET  /api/leads[?rep=all]           1  listLeads
+//   GET  /api/leads?rep=default         2  listReps, then listLeads
 //   GET  /api/leads?rep=<uuid>          1  listLeads (+1 getRep only when the list is
 //                                          empty, to tell "no leads" from "unknown rep")
 //   GET  /api/leads/[id]                1  getLead (lead + rep name + chat, one embed)

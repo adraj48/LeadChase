@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DraftSanitizer, SseTextParser, sanitizeDraft, streamDraft } from "@/lib/draft-stream";
+import { resetGeminiBreaker } from "@/lib/gemini-breaker";
 import type { AgentInput } from "@/lib/agent";
 import type { DraftPromptInput } from "@/lib/draft-prompt";
 
@@ -119,6 +120,7 @@ async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
 
 describe("streamDraft", () => {
   beforeEach(() => {
+    resetGeminiBreaker();
     vi.stubEnv("GEMINI_API_KEY", "test-secret-key");
     vi.stubEnv("GEMINI_MODEL", "");
   });
@@ -137,6 +139,18 @@ describe("streamDraft", () => {
     expect(body.systemInstruction.parts[0].text).toMatch(/^You are Sneha/);
     expect(body.contents[0].parts[0].text).toContain("Please share quote");
     expect(JSON.stringify(body)).not.toContain("test-secret-key");
+  });
+  it("after a 429 the next call goes straight to the fallback without fetching", async () => {
+    let t = 5_000;
+    const clock = () => t;
+    const limited = vi.fn(async () => new Response("{}", { status: 429 }));
+    expect((await streamDraft(prompt, fallbackInput, undefined, limited as unknown as typeof fetch, clock)).source).toBe("fallback");
+    const skipped = vi.fn();
+    expect((await streamDraft(prompt, fallbackInput, undefined, skipped as unknown as typeof fetch, clock)).source).toBe("fallback");
+    expect(skipped).not.toHaveBeenCalled();
+    t += 60_000;
+    const ok = vi.fn(async () => new Response(sseBody(sse(["Hello there, this is a reply to you."])), { status: 200 }));
+    expect((await streamDraft(prompt, fallbackInput, undefined, ok as unknown as typeof fetch, clock)).source).toBe("llm");
   });
   it("uses GEMINI_MODEL when set", async () => {
     vi.stubEnv("GEMINI_MODEL", "gemini-custom");

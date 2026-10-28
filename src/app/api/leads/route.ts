@@ -1,31 +1,37 @@
 import { getServerSupabase } from "@/lib/supabase/server";
-import { createLead, getRep, listLeads } from "@/lib/repo";
+import { createLead, getRep, listLeads, listReps } from "@/lib/repo";
 import { analyzeLead } from "@/lib/agent";
 import { todayIST } from "@/lib/dates";
 import { sortByUrgency } from "@/lib/urgency";
 import { validateNewLead } from "@/lib/validate";
 import { ALL_REPS_VIEWER, parseRepScope } from "@/lib/access";
+import { pickDefaultRepId } from "@/lib/rep-selection";
 import { stageTimer } from "@/lib/timing";
 import { HttpError, json, readJson, withErrors } from "@/lib/http";
 
 export const maxDuration = 60;
 
-// GET /api/leads?rep=<uuid|all> (default all) -> { today, me, leads }. `me` is always
+// GET /api/leads?rep=<uuid|all|default> (default all) -> { today, me, viewing, leads }. `me` is always
 // ALL_REPS_VIEWER: there is no login, it is kept so the response keeps its shape.
 export const GET = withErrors(async (req: Request) => {
   const timer = stageTimer("GET leads");
   const scope = parseRepScope(new URL(req.url).searchParams.get("rep"));
   if (scope.kind === "invalid") throw new HttpError(400, "Invalid rep");
   const sb = getServerSupabase();
-  const repId = scope.kind === "rep" ? scope.repId : undefined;
+  // rep=default: resolve the default rep from the (small) reps table, then one leads query.
+  let repId = scope.kind === "rep" ? scope.repId : undefined;
+  if (scope.kind === "default") {
+    const picked = pickDefaultRepId(await listReps(sb));
+    if (picked !== "all") repId = picked;
+  }
   const today = todayIST();
   const leads = await listLeads(sb, repId);
   timer.mark("leads");
   // An empty list for one rep may mean the id is unknown: only then is a lookup needed.
-  if (repId && leads.length === 0 && !(await getRep(sb, repId))) {
+  if (scope.kind === "rep" && leads.length === 0 && !(await getRep(sb, scope.repId))) {
     throw new HttpError(400, "Unknown rep");
   }
-  const out = json({ today, me: ALL_REPS_VIEWER, leads: sortByUrgency(leads, today) });
+  const out = json({ today, me: ALL_REPS_VIEWER, viewing: repId ?? "all", leads: sortByUrgency(leads, today) });
   timer.mark("respond");
   timer.done();
   return out;

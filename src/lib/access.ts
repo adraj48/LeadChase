@@ -5,12 +5,15 @@ import type { Viewer } from "@/lib/types";
 
 export const ALL_REPS = "all";
 
-export type RepScope = { kind: "all" } | { kind: "rep"; repId: string } | { kind: "invalid" };
+export const DEFAULT_REP = "default";
 
-/** Parses ?rep=. Missing, empty or "all" means every rep; otherwise it must be a uuid. */
+export type RepScope = { kind: "all" } | { kind: "default" } | { kind: "rep"; repId: string } | { kind: "invalid" };
+
+/** Parses ?rep=. Missing, empty or "all" means every rep; "default" means the server picks the default rep; otherwise it must be a uuid. */
 export function parseRepScope(raw: string | null): RepScope {
   const v = raw?.trim() ?? "";
   if (v === "" || v.toLowerCase() === ALL_REPS) return { kind: "all" };
+  if (v.toLowerCase() === DEFAULT_REP) return { kind: "default" };
   if (UUID_RE.test(v)) return { kind: "rep", repId: v.toLowerCase() };
   return { kind: "invalid" };
 }

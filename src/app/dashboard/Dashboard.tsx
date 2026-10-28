@@ -15,6 +15,8 @@ import { createLeadDetailCache, warmupIds } from "@/lib/lead-detail-client";
 import { markOpenClick } from "@/lib/open-perf";
 import {
   ALL_REPS,
+  DEFAULT_LEADS_URL,
+  isViewing,
   leadsUrl,
   parseReps,
   readViewing,
@@ -146,26 +148,68 @@ export function Dashboard() {
   listRef.current = list;
 
   // Rep list + remembered choice. A stored choice starts the lead fetch at once
-  // (in parallel with /api/reps); otherwise the default rep is picked once reps arrive.
+  // (in parallel with /api/reps). With nothing stored, /api/reps and the server-resolved
+  // default list (?rep=default) are fetched together: the list renders as soon as it
+  // arrives (its `viewing` field names the rep), then the rep list reconciles the selector.
+  const preloadedRef = useRef<Viewing | null>(null);
+  const userChoseRef = useRef(false);
   useEffect(() => {
     const stored = readViewing(browserStorage());
     if (stored) setViewingState(stored);
     const ctrl = new AbortController();
+    let repList: RepOption[] | null = null;
+    let defaultPending = !stored;
+    let repsFailed = false;
+
+    const reconcile = () => {
+      if (repList) {
+        const l = repList;
+        setViewingState((v) => resolveViewing(l, v ?? stored));
+      }
+    };
+
+    if (!stored) {
+      fetch(DEFAULT_LEADS_URL, { signal: ctrl.signal })
+        .then(async (res) => {
+          const body = await res.json().catch(() => null);
+          if (!res.ok || !body || !Array.isArray(body.leads) || typeof body.today !== "string" || !isViewing(body.viewing)) {
+            throw new Error("default list unavailable");
+          }
+          if (ctrl.signal.aborted) return;
+          const v: Viewing = body.viewing;
+          if (userChoseRef.current) return; // the user picked a rep meanwhile: that load wins
+          preloadedRef.current = v;
+          setList({ viewing: v, leads: body.leads, today: body.today });
+          setLoading(false);
+          setViewingState(v);
+        })
+        .catch(() => {})
+        .finally(() => {
+          defaultPending = false;
+          if (ctrl.signal.aborted) return;
+          reconcile();
+          if (repsFailed) setViewingState((v) => v ?? ALL_REPS);
+        });
+    }
+
     fetch("/api/reps", { signal: ctrl.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`reps ${r.status}`))))
       .then((b) => {
-        const list = parseReps(b);
-        setReps(list);
-        setViewingState((v) => resolveViewing(list, v ?? stored));
+        repList = parseReps(b);
+        setReps(repList);
+        // While the default list is in flight, wait for its answer instead of racing it.
+        if (!defaultPending) reconcile();
       })
       .catch(() => {
         if (ctrl.signal.aborted) return;
-        setViewingState((v) => v ?? ALL_REPS);
+        repsFailed = true;
+        if (!defaultPending) setViewingState((v) => v ?? ALL_REPS);
       });
     return () => ctrl.abort();
   }, []);
 
   const setViewing = useCallback((v: Viewing) => {
+    userChoseRef.current = true;
     writeViewing(browserStorage(), v);
     setViewingState(v);
     // Keep an open lead only if it belongs to the new view.
@@ -209,6 +253,11 @@ export function Dashboard() {
   }, [viewing]);
 
   useEffect(() => {
+    // The default list was just rendered from the ?rep=default response: no refetch.
+    if (preloadedRef.current !== null && listRef.current?.viewing === preloadedRef.current) {
+      preloadedRef.current = null;
+      return () => abortRef.current?.abort();
+    }
     reload();
     return () => abortRef.current?.abort();
   }, [reload]);

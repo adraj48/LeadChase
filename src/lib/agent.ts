@@ -1,6 +1,7 @@
 import type { Lead, Message, Tag } from "@/lib/types";
 import { addDays, diffDays, istDateOf } from "@/lib/dates";
 import { buildContext } from "@/lib/draft-context";
+import { geminiBlocked, noteGeminiStatus } from "@/lib/gemini-breaker";
 import { EXAMPLES, persona, voiceRules } from "@/lib/draft-voice";
 
 // Server-only module (reads GEMINI_API_KEY). Do not import from client code.
@@ -209,9 +210,10 @@ export function geminiModel(): string {
 export async function analyzeLead(
   input: AgentInput,
   fetchImpl: typeof fetch = fetch,
+  now: () => number = Date.now,
 ): Promise<AgentResult> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return fallbackAnalysis(input);
+  if (!key || geminiBlocked(now())) return fallbackAnalysis(input);
   const model = geminiModel();
   const repFirst = input.repName ? firstName(input.repName) : undefined;
   try {
@@ -232,7 +234,10 @@ export async function analyzeLead(
         signal: AbortSignal.timeout(12000),
       },
     );
-    if (!res.ok) return fallbackAnalysis(input);
+    if (!res.ok) {
+      noteGeminiStatus(res.status, now());
+      return fallbackAnalysis(input);
+    }
     const data = (await res.json()) as {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
     };

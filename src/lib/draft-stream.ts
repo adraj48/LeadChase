@@ -1,4 +1,5 @@
 import { buildDraftPrompt, DRAFT_GENERATION_CONFIG, type DraftPromptInput } from "@/lib/draft-prompt";
+import { geminiBlocked, noteGeminiStatus } from "@/lib/gemini-breaker";
 import { fallbackAnalysis, geminiModel, type AgentInput } from "@/lib/agent";
 
 // Server-only module (reads GEMINI_API_KEY). Do not import from client code.
@@ -176,9 +177,10 @@ export async function streamDraft(
   fallbackInput: AgentInput,
   signal?: AbortSignal,
   fetchImpl: typeof fetch = fetch,
+  now: () => number = Date.now,
 ): Promise<DraftStream> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return fallbackDraftStream(fallbackInput);
+  if (!key || geminiBlocked(now())) return fallbackDraftStream(fallbackInput);
 
   const upstream = new AbortController();
   const onClientAbort = () => upstream.abort();
@@ -228,6 +230,7 @@ export async function streamDraft(
       },
     );
     if (!res.ok || !res.body) {
+      if (!res.ok) noteGeminiStatus(res.status, now());
       cleanup();
       await res.body?.cancel().catch(() => {});
       return fallbackDraftStream(fallbackInput);

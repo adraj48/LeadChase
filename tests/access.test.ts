@@ -11,6 +11,10 @@ describe("parseRepScope (?rep=)", () => {
     expect(parseRepScope("all")).toEqual({ kind: "all" });
     expect(parseRepScope("ALL")).toEqual({ kind: "all" });
   });
+  it("'default' asks the server to pick the default rep (case-insensitive)", () => {
+    expect(parseRepScope("default")).toEqual({ kind: "default" });
+    expect(parseRepScope(" DEFAULT ")).toEqual({ kind: "default" });
+  });
   it("a uuid selects that rep (normalised to lower case)", () => {
     expect(parseRepScope(REP)).toEqual({ kind: "rep", repId: REP });
     expect(parseRepScope(REP.toUpperCase())).toEqual({ kind: "rep", repId: REP });

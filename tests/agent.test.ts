@@ -8,6 +8,7 @@ import {
   type AgentInput,
 } from "@/lib/agent";
 import { addDays } from "@/lib/dates";
+import { resetGeminiBreaker } from "@/lib/gemini-breaker";
 
 const TODAY = "2026-10-28";
 
@@ -199,6 +200,7 @@ describe("fallbackAnalysis", () => {
 
 describe("analyzeLead", () => {
   beforeEach(() => {
+    resetGeminiBreaker();
     vi.stubEnv("GEMINI_API_KEY", "test-secret-key");
     vi.stubEnv("GEMINI_MODEL", "");
   });
@@ -317,6 +319,21 @@ describe("analyzeLead", () => {
   it("falls back when fetch rejects", async () => {
     const f = vi.fn().mockRejectedValue(new Error("network"));
     expect((await analyzeLead(input(), f as unknown as typeof fetch)).analysisSource).toBe("fallback");
+  });
+  it("after a 429 skips the network for 60s (no fetch), then tries again", async () => {
+    const limited = vi.fn().mockResolvedValue(new Response("rate limited", { status: 429 }));
+    let t = 10_000;
+    const clock = () => t;
+    expect((await analyzeLead(input(), limited as unknown as typeof fetch, clock)).analysisSource).toBe("fallback");
+    expect(limited).toHaveBeenCalledTimes(1);
+    t += 59_000;
+    const skipped = vi.fn();
+    expect((await analyzeLead(input(), skipped as unknown as typeof fetch, clock)).analysisSource).toBe("fallback");
+    expect(skipped).not.toHaveBeenCalled();
+    t += 1_000;
+    const ok = vi.fn().mockResolvedValue(geminiResponse(JSON.stringify(validJson)));
+    expect((await analyzeLead(input(), ok as unknown as typeof fetch, clock)).analysisSource).toBe("llm");
+    expect(ok).toHaveBeenCalledTimes(1);
   });
   it("falls back on HTTP 429", async () => {
     const f = vi.fn().mockResolvedValue(new Response("rate limited", { status: 429 }));

@@ -108,7 +108,7 @@ describe("GET /api/leads", () => {
     const r = await leadsGET(req("GET", undefined, "http://t/api/leads"));
     const j = await r.json();
     expect(r.status).toBe(200);
-    expect(Object.keys(j)).toEqual(["today", "me", "leads"]);
+    expect(Object.keys(j)).toEqual(["today", "me", "viewing", "leads"]);
     expect(j.today).toBe(todayIST());
     expect(j.me).toEqual({ id: "all", name: "All reps", email: "", role: "owner" });
     expect(j.leads.map((l: { id: string }) => l.id)).toEqual(["b", "a"]);
@@ -141,6 +141,38 @@ describe("GET /api/leads", () => {
     const r = await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`));
     expect(r.status).toBe(400);
     expect(await r.json()).toEqual({ error: "Unknown rep" });
+  });
+  it("?rep=default resolves Sneha by name, lists her leads and reports viewing", async () => {
+    m.listReps.mockResolvedValue([{ id: OTHER, name: "Arjun" }, { id: rep.id, name: "sneha IYER" }]);
+    m.listLeads.mockResolvedValue([mkLead({ repId: rep.id })]);
+    const r = await leadsGET(req("GET", undefined, "http://t/api/leads?rep=default"));
+    expect(r.status).toBe(200);
+    const b = await r.json();
+    expect(b.viewing).toBe(rep.id);
+    expect(b.leads).toHaveLength(1);
+    expect(m.listLeads.mock.calls[0][1]).toBe(rep.id);
+    expect(m.getRep).not.toHaveBeenCalled();
+  });
+  it("?rep=default without a Sneha rep uses the first rep by name", async () => {
+    m.listReps.mockResolvedValue([{ id: rep.id, name: "Zed" }, { id: OTHER, name: "Arjun" }]);
+    m.listLeads.mockResolvedValue([]);
+    const r = await leadsGET(req("GET", undefined, "http://t/api/leads?rep=default"));
+    expect(r.status).toBe(200);
+    expect((await r.json()).viewing).toBe(OTHER);
+    expect(m.listLeads.mock.calls[0][1]).toBe(OTHER);
+    expect(m.getRep).not.toHaveBeenCalled();
+  });
+  it("?rep=default with no reps lists all leads, viewing all", async () => {
+    m.listReps.mockResolvedValue([]);
+    m.listLeads.mockResolvedValue([mkLead()]);
+    const r = await leadsGET(req("GET", undefined, "http://t/api/leads?rep=default"));
+    expect((await r.json()).viewing).toBe("all");
+    expect(m.listLeads.mock.calls[0][1]).toBeUndefined();
+  });
+  it("viewing is echoed for uuid and all scopes too", async () => {
+    m.listLeads.mockResolvedValue([mkLead({ repId: OTHER })]);
+    expect((await (await leadsGET(req("GET", undefined, `http://t/api/leads?rep=${OTHER}`))).json()).viewing).toBe(OTHER);
+    expect((await (await leadsGET(req("GET", undefined, "http://t/api/leads"))).json()).viewing).toBe("all");
   });
   it("a malformed ?rep= => 400 without querying", async () => {
     const r = await leadsGET(req("GET", undefined, "http://t/api/leads?rep=nope"));

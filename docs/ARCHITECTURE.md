@@ -256,7 +256,7 @@ Inputs are validated in `src/lib/validate.ts`.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/reps` | `{reps: [{id, name}]}` for the "Viewing as" selector |
-| `GET /api/leads?rep=<uuid\|all>` | List leads sorted by urgency, with today's date, for one rep or all reps |
+| `GET /api/leads?rep=<uuid\|all\|default>` | List leads sorted by urgency, with today's date, for one rep or all reps; `default` resolves Sneha Iyer (else the first rep, else all) on the server and the response's `viewing` names the rep, so first-time visitors load it in parallel with `/api/reps` |
 | `POST /api/leads` | Add a lead for `repId` (required); the agent tags it and drafts a message |
 | `GET /api/leads/:id` | One lead with its chat in one database round trip (also the polling fallback while an analysis is pending) |
 | `PUT /api/leads/:id/draft` | Save an edited draft |

@@ -47,6 +47,8 @@ async function main() {
   const all = await listLeads(owner);
   assert(all.length === SEED_LEADS.length, `owner sees all ${SEED_LEADS.length} leads (saw ${all.length})`);
 
+  assert(all.every((l) => l.repName.trim().length > 0), "owner: every lead has a non-empty repName (reps(name) embed works under RLS)");
+
   const rep1 = await signIn("rep1@axon.demo");
   console.log("rep1");
   const me = await getCurrentRep(rep1);
@@ -55,6 +57,7 @@ async function main() {
   assert(mine.length > 0, `sees > 0 leads (saw ${mine.length})`);
   assert(mine.every((l) => l.repId === me!.id), "every visible lead belongs to rep1");
   assert(mine.length < all.length, "sees fewer leads than the owner");
+  assert(mine.every((l) => l.repName.trim().length > 0), "rep1: every lead has a non-empty repName (reps(name) embed works under RLS)");
 
   const chatPhones = new Set(SEED_LEADS.filter((l) => l.messages.length > 0).map((l) => l.phone));
   const other = all.find((l) => l.repId !== me!.id && chatPhones.has(l.phone));
@@ -69,6 +72,9 @@ async function main() {
   assert(ownerView !== null && ownerView.messages.length > 0, "owner sees another rep's lead with its messages");
   const ownView = await getLead(rep1, own.id);
   assert(ownView !== null && ownView.messages.length > 0, "rep1 sees own lead with its messages");
+
+  // Positive own-lead write (same draft back, so seeded data is untouched).
+  assert(ownView !== null && (await saveDraft(rep1, own.id, ownView.lead.draft)) === true, "saveDraft on rep1's own lead returns true");
 
   // Leads policy: another rep's lead is invisible and unchangeable.
   assert((await getLead(rep1, other.id)) === null, "getLead on another rep's lead returns null");

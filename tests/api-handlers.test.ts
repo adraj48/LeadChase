@@ -22,6 +22,7 @@ import { POST as sentPOST } from "@/app/api/leads/[id]/sent/route";
 import { PUT as draftPUT } from "@/app/api/leads/[id]/draft/route";
 import { GET as repsGET } from "@/app/api/reps/route";
 import { todayIST } from "@/lib/dates";
+import type { Message } from "@/lib/types";
 
 const m = vi.mocked(repo);
 const agent = vi.mocked(analyzeLead);
@@ -231,11 +232,11 @@ describe("POST sent", () => {
     m.addMessage.mockImplementation(async () => { order.push("addMessage"); return { id: "m", leadId: ID, from: "rep", text: "hi", at: "t" }; });
     agent.mockImplementation(async () => { order.push("analyze"); return result; });
     m.saveAnalysis.mockImplementation(async () => { order.push("save"); return true; });
-    const r = await sentPOST(req("POST", { draft: " hi " }), ctx(ID));
+    const r = await sentPOST(req("POST", { draft: " hello " }), ctx(ID));
     expect(r.status).toBe(200);
     expect(order.indexOf("addMessage")).toBeLessThan(order.indexOf("analyze"));
     expect(order.indexOf("analyze")).toBeLessThan(order.indexOf("save"));
-    expect(m.addMessage).toHaveBeenCalledWith(expect.anything(), ID, "rep", "hi");
+    expect(m.addMessage).toHaveBeenCalledWith(expect.anything(), ID, "rep", "hello");
     expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
     expect(agent.mock.calls[0][0].messages[0]).toEqual({ from: "rep", text: "hi", at: "2026-10-02T00:00:00Z" });
     expect(await r.json()).toEqual(after);
@@ -246,7 +247,7 @@ describe("POST sent", () => {
     m.getLead.mockResolvedValue(chat());
     m.addMessage.mockResolvedValue({ id: "m", leadId: ID, from: "rep", text: "hi", at: "t" });
     m.saveAnalysis.mockResolvedValue(true);
-    const r = await sentPOST(req("POST", { draft: "hi" }), ctx(ID));
+    const r = await sentPOST(req("POST", { draft: "hello" }), ctx(ID));
     expect(r.status).toBe(200);
     expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, fb, todayIST());
   });
@@ -291,5 +292,55 @@ describe("error mapping", () => {
     const r = await repsGET(req("GET"));
     expect(r.status).toBe(500);
     expect(await r.json()).toEqual({ error: "Something went wrong" });
+  });
+});
+
+describe("retry guard (no duplicate message)", () => {
+  const msg = (from: "rep" | "buyer", text: string): Message => ({ id: "x", leadId: ID, from, text, at: "2026-10-03T00:00:00Z" });
+  const withLatest = (from: "rep" | "buyer", text: string) => {
+    const c = { ...chat(), messages: [...chat().messages] as Message[] };
+    c.messages.push(msg(from, text));
+    m.getLead.mockResolvedValue(c);
+    m.addMessage.mockResolvedValue(msg("rep", "n"));
+    m.saveAnalysis.mockResolvedValue(true);
+    return c;
+  };
+
+  it("/sent: latest is identical rep message => no addMessage, still analyses and saves", async () => {
+    const c = withLatest("rep", "Hi");
+    const r = await sentPOST(req("POST", { draft: "Hi" }), ctx(ID));
+    expect(r.status).toBe(200);
+    expect(m.addMessage).not.toHaveBeenCalled();
+    expect(agent).toHaveBeenCalled();
+    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
+    expect(await r.json()).toEqual(c);
+  });
+  it("/sent: same text from the buyer still adds", async () => {
+    withLatest("buyer", "Hi");
+    await sentPOST(req("POST", { draft: "Hi" }), ctx(ID));
+    expect(m.addMessage).toHaveBeenCalledTimes(1);
+  });
+  it("/sent: differing latest rep message still adds", async () => {
+    withLatest("rep", "Other");
+    await sentPOST(req("POST", { draft: "Hi" }), ctx(ID));
+    expect(m.addMessage).toHaveBeenCalledTimes(1);
+  });
+  it("/sent: whitespace is ignored", async () => {
+    withLatest("rep", "Hi");
+    await sentPOST(req("POST", { draft: "  Hi  " }), ctx(ID));
+    expect(m.addMessage).not.toHaveBeenCalled();
+  });
+  it("/messages: same from+text as latest => no addMessage, analysis still runs", async () => {
+    withLatest("buyer", "Price?");
+    const r = await messagesPOST(req("POST", { from: "buyer", text: " Price? " }), ctx(ID));
+    expect(r.status).toBe(200);
+    expect(m.addMessage).not.toHaveBeenCalled();
+    expect(agent).toHaveBeenCalled();
+    expect(m.saveAnalysis).toHaveBeenCalledWith(expect.anything(), ID, result, todayIST());
+  });
+  it("/messages: same text, different from => adds", async () => {
+    withLatest("buyer", "Price?");
+    await messagesPOST(req("POST", { from: "rep", text: "Price?" }), ctx(ID));
+    expect(m.addMessage).toHaveBeenCalledTimes(1);
   });
 });

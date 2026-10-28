@@ -25,3 +25,14 @@ export async function reanalyze(sb: SupabaseClient, id: string, lastContactDate?
   if (!fresh) throw new HttpError(404, "Lead not found");
   return fresh;
 }
+
+// Retry guard: true when the latest message already matches (same sender, same
+// trimmed text), i.e. a retried or double-submitted request. Skip the insert then.
+export function isDuplicateOfLatest(
+  messages: { from: "rep" | "buyer"; text: string }[],
+  from: "rep" | "buyer",
+  text: string,
+): boolean {
+  const last = messages[messages.length - 1];
+  return !!last && last.from === from && last.text.trim() === text.trim();
+}

@@ -6,6 +6,7 @@ import type { Lead, Rep } from "@/lib/types";
 import { groupLeads, summaryLine, tagCounts } from "@/lib/lead-view";
 import { Header } from "@/components/Header";
 import { LeadRow } from "@/components/LeadRow";
+import { LeadDetail } from "@/components/LeadDetail";
 
 type Me = Pick<Rep, "name" | "role">;
 
@@ -176,8 +177,7 @@ export function Dashboard({ me }: { me: Me }) {
         </div>
         <div className={`min-w-0 ${selected ? "" : "hidden lg:block"}`}>
           {selected ? (
-            // replaced in Task 8
-            <div className="rounded-lg bg-white p-4 shadow-sm">
+            <div>
               <button
                 type="button"
                 onClick={() => setSelectedId(null)}
@@ -185,7 +185,17 @@ export function Dashboard({ me }: { me: Me }) {
               >
                 ← Back
               </button>
-              <h2 ref={detailHeadingRef} tabIndex={-1} className="text-lg font-bold text-slate-900 focus:outline-none">{selected.name}</h2>
+              <LeadDetail
+                leadId={selected.id}
+                headingRef={detailHeadingRef}
+                today={today}
+                isOwner={isOwner}
+                onChanged={reload}
+                onGone={() => {
+                  setSelectedId(null);
+                  reload();
+                }}
+              />
             </div>
           ) : (
             <DetailPlaceholder />

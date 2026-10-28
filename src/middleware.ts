@@ -48,7 +48,13 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
+  // Protected trees are listed explicitly so the static-asset exclusion below
+  // (which skips any path ending in an image extension) can never bypass them.
   matcher: [
+    "/",
+    "/login",
+    "/dashboard/:path*",
+    "/api/:path*",
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

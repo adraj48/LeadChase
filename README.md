@@ -10,7 +10,7 @@ An AI lead follow-up agent for a sales team. It reads each lead's chat, tags the
 
 ## Live demo
 
-Live link: `<LIVE_URL>`
+Live link: https://leadchase.vercel.app
 
 The app opens straight on the dashboard. There is no login: the brief lists login as out of scope, so the demo has no authentication by design (see [Security model and limitations](#security-model-and-limitations)).
 
